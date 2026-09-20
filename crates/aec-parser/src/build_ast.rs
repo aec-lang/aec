@@ -1,6 +1,7 @@
 use crate::errors::build_error;
 use crate::Rule;
 use aec_ast::{
+    Style, StyleValue,
     AgentHeader, Argument, ArrayExpr, AssignOp, AssignStmt, AwaitExpr,
     BinaryExpr, BinaryOp, Block, CallExpr, ElseBranch, Expr, ForStmt,
     FunctionDecl, Identifier, IfStmt, ImportStmt, IndexExpr, LValue,
@@ -893,11 +894,59 @@ fn build_ui_block(pair: Pair<Rule>) -> Result<Vec<UiStatement>, ParseError> {
 fn build_ui_statement(pair: Pair<Rule>) -> Result<Option<UiStatement>, ParseError> {
     match pair.as_rule() {
         Rule::state_decl_ui => Ok(Some(UiStatement::State(build_state_decl_ui(pair)?))),
+        Rule::display_expr => Ok(Some(UiStatement::Element(build_display_expr(pair)?))),
+        Rule::messages_expr => Ok(Some(UiStatement::Element(build_messages_expr(pair)?))),
         Rule::element_expr => Ok(Some(UiStatement::Element(build_element_expr(pair)?))),
         Rule::ui_if => Ok(Some(UiStatement::If(build_ui_if(pair)?))),
         Rule::ui_for => Ok(Some(UiStatement::For(build_ui_for(pair)?))),
         _ => Ok(None),
     }
+}
+
+fn build_display_expr(pair: Pair<Rule>) -> Result<ElementExpr, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let id_pair = inner.next().ok_or_else(|| {
+        build_error(span, "Display needs an identifier")
+    })?;
+    let id = build_identifier(id_pair)?;
+
+    let name = Identifier::new("Display", span);
+
+    Ok(ElementExpr {
+        name,
+        primary_arg: Some(Expr::Identifier(id)),
+        modifiers: vec![],
+        children: None,
+        style: Style::new(),
+        span,
+    })
+}
+
+fn build_messages_expr(pair: Pair<Rule>) -> Result<ElementExpr, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let id_pair = inner.next().ok_or_else(|| {
+        build_error(span, "Messages needs an identifier")
+    })?;
+    let id = build_identifier(id_pair)?;
+
+    let name = Identifier::new("Messages", span);
+
+    Ok(ElementExpr {
+        name,
+        primary_arg: None,
+        modifiers: vec![ElementModifier::Property(ElementProperty {
+            name: Identifier::new("list", span),
+            value: Expr::Identifier(id),
+            span,
+        })],
+        children: None,
+        style: Style::new(),
+        span,
+    })
 }
 
 fn build_state_decl_ui(pair: Pair<Rule>) -> Result<StateDeclUi, ParseError> {
@@ -972,6 +1021,7 @@ fn build_element_expr(pair: Pair<Rule>) -> Result<ElementExpr, ParseError> {
     let mut primary_arg = None;
     let mut modifiers = Vec::new();
     let mut children = None;
+    let mut style = Style::new();
 
     for p in inner {
         match p.as_rule() {
@@ -980,6 +1030,20 @@ fn build_element_expr(pair: Pair<Rule>) -> Result<ElementExpr, ParseError> {
                 primary_arg = Some(Expr::Literal(Box::new(
                     aec_ast::LiteralExpr { value: lit, span }
                 )));
+            }
+            Rule::int_literal | Rule::float_literal | Rule::bool_literal => {
+                if primary_arg.is_none() {
+                    let lit = build_literal(p)?;
+                    primary_arg = Some(Expr::Literal(Box::new(
+                        aec_ast::LiteralExpr { value: lit, span }
+                    )));
+                }
+            }
+            Rule::identifier => {
+                if primary_arg.is_none() {
+                    let id = build_identifier(p)?;
+                    primary_arg = Some(Expr::Identifier(id));
+                }
             }
             Rule::element_property => {
                 modifiers.push(ElementModifier::Property(build_element_property(p)?));
@@ -990,15 +1054,13 @@ fn build_element_expr(pair: Pair<Rule>) -> Result<ElementExpr, ParseError> {
             Rule::event_handler => {
                 modifiers.push(ElementModifier::Event(build_event_handler(p)?));
             }
+            Rule::style_block => {
+                style = build_style_block(p)?;
+            }
             Rule::element_children => {
                 children = Some(build_ui_block(p)?);
             }
-            _ => {
-                // ممکنه expr باشه (برای primary_arg)
-                if primary_arg.is_none() {
-                    primary_arg = Some(build_expr(p)?);
-                }
-            }
+            _ => {}
         }
     }
 
@@ -1007,8 +1069,63 @@ fn build_element_expr(pair: Pair<Rule>) -> Result<ElementExpr, ParseError> {
         primary_arg,
         modifiers,
         children,
+        style,
         span,
     })
+}
+
+fn build_style_block(pair: Pair<Rule>) -> Result<Style, ParseError> {
+    let mut style = Style::new();
+
+    for p in pair.into_inner() {
+        if p.as_rule() == Rule::style_property {
+            let mut inner = p.into_inner();
+            let name_pair = inner.next().unwrap();
+            let name = name_pair.as_str().to_string();
+
+            let value_pair = inner.next().ok_or_else(|| {
+                build_error(Span::dummy(), "style property needs a value")
+            })?;
+
+            let value = build_style_value(value_pair)?;
+            style.properties.insert(name, value);
+        }
+    }
+
+    Ok(style)
+}
+
+fn build_style_value(pair: Pair<Rule>) -> Result<StyleValue, ParseError> {
+    match pair.as_rule() {
+        Rule::style_string => {
+            let s = pair.as_str();
+            let inner = &s[1..s.len()-1];
+            Ok(StyleValue::String(inner.to_string()))
+        }
+        Rule::style_number => {
+            let s = pair.as_str();
+            if s.contains('.') {
+                s.parse::<f64>()
+                    .map(StyleValue::Float)
+                    .map_err(|e| build_error(pair_span(&pair), format!("invalid number: {}", e)))
+            } else {
+                s.parse::<i64>()
+                    .map(StyleValue::Int)
+                    .map_err(|e| build_error(pair_span(&pair), format!("invalid int: {}", e)))
+            }
+        }
+        Rule::style_bool => {
+            Ok(StyleValue::Bool(pair.as_str() == "true"))
+        }
+        Rule::identifier => {
+            Ok(StyleValue::Ident(pair.as_str().to_string()))
+        }
+        Rule::style_value => {
+            let inner = pair.into_inner().next().unwrap();
+            build_style_value(inner)
+        }
+        rule => Err(build_error(pair_span(&pair), format!("unsupported style value: {:?}", rule))),
+    }
 }
 
 fn build_element_property(pair: Pair<Rule>) -> Result<ElementProperty, ParseError> {
@@ -1030,21 +1147,24 @@ fn build_binding(pair: Pair<Rule>) -> Result<Binding, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let target_pair = inner.next().unwrap();
-    let target = build_identifier(target_pair)?;
+    // فرمت: bind value to message
+    // value = نام property
+    // message = نام state variable
 
-    let source_pair = inner.next().ok_or_else(|| {
-        build_error(span, "binding needs a source")
+    let property_pair = inner.next().unwrap();
+    let property_name = build_identifier(property_pair)?;
+
+    let state_pair = inner.next().ok_or_else(|| {
+        build_error(span, "binding needs a state variable")
     })?;
-    let source = build_expr_from_identifier(source_pair)?;
+    let state_name = build_identifier(state_pair)?;
 
-    // بقیه‌ی member_op و call_op ها
-    for op in inner {
-        // TODO: handle later
-        let _ = op;
-    }
-
-    Ok(Binding { target, source, span })
+    // target = state (message)، source = property (value)
+    Ok(Binding {
+        target: state_name,
+        source: Expr::Identifier(property_name),
+        span,
+    })
 }
 
 fn build_event_handler(pair: Pair<Rule>) -> Result<EventHandler, ParseError> {

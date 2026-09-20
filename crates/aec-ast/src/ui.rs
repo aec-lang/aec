@@ -4,6 +4,7 @@
 use crate::expr::Expr;
 use crate::program::Identifier;
 use crate::span::Span;
+use crate::style::Style;
 
 /// ui Main = Screen "Title" { ... }
 #[derive(Debug, Clone)]
@@ -55,6 +56,7 @@ pub struct ElementExpr {
     pub primary_arg: Option<Expr>,
     pub modifiers: Vec<ElementModifier>,
     pub children: Option<Vec<UiStatement>>,
+    pub style: Style,
     pub span: Span,
 }
 

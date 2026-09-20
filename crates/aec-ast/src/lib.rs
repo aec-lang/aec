@@ -7,6 +7,7 @@ pub mod model;
 pub mod expr;
 pub mod function;
 pub mod ui;
+pub mod style;
 
 pub use span::{Span, Position, Spanned};
 pub use error::{ParseError, ParseErrorKind};
@@ -28,3 +29,4 @@ pub use ui::{
     UiDecl, ScreenExpr, UiStatement, StateDeclUi, ElementExpr, ElementModifier,
     ElementProperty, Binding, EventHandler, UiIf, UiFor, TypeRef,
 };
+pub use style::{Style, StyleValue};

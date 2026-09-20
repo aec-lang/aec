@@ -141,7 +141,7 @@ screen_expr = { "Screen" ~ string_literal ~ block_ui }
 
 block_ui = { "{" ~ NEWLINE* ~ ui_statement* ~ NEWLINE* ~ "}" }
 
-ui_statement = _{ state_decl_ui | element_expr | ui_if | ui_for }
+ui_statement = _{ state_decl_ui | display_expr | messages_expr | element_expr | ui_if | ui_for }
 
 // @message: string = ""
 state_decl_ui = { "@" ~ identifier ~ (":" ~ base_type)? ~ "=" ~ expr ~ NEWLINE* }
@@ -149,7 +149,8 @@ state_decl_ui = { "@" ~ identifier ~ (":" ~ base_type)? ~ "=" ~ expr ~ NEWLINE* 
 // Text "Hello"
 // Button "Send" on click -> do_this()
 // Column { ... }
-element_expr = { element_name ~ primary_arg? ~ element_modifier* ~ element_children? ~ NEWLINE* }
+element_expr = { element_name ~ primary_arg? ~ element_modifier* ~ style_block? ~ element_children? ~ NEWLINE* }
+
 
 element_name = @{ ('A'..'Z') ~ (ASCII_ALPHANUMERIC | "_")* }
 
@@ -158,8 +159,8 @@ primary_arg = _{ string_literal | int_literal | float_literal | bool_literal }
 element_modifier = _{ element_property | binding | event_handler }
 
 element_property = { identifier ~ ":" ~ expr }
-binding = { "bind" ~ identifier ~ "to" ~ identifier ~ (member_op | call_op)* ~ NEWLINE+ }
-event_handler = { "on" ~ identifier ~ "->" ~ identifier ~ (member_op | call_op)* ~ NEWLINE+ }
+binding = { "bind" ~ identifier ~ "to" ~ identifier ~ (member_op | call_op)* ~ NEWLINE* }
+event_handler = { "on" ~ identifier ~ "->" ~ identifier ~ (member_op | call_op)* ~ NEWLINE* }
 
 element_children = { "{" ~ NEWLINE* ~ ui_statement* ~ NEWLINE* ~ "}" }
 
@@ -171,3 +172,20 @@ ui_for = { "for" ~ identifier ~ "in" ~ expr ~ block_ui ~ NEWLINE* }
 
 // مسیر expression بدون NEWLINE (برای bind و on)
 expression_path = { identifier ~ (member_op | call_op)* }
+
+
+// Display state variable
+display_expr = { "Display" ~ identifier ~ NEWLINE* }
+
+// Messages list
+messages_expr = { "Messages" ~ "list" ~ ":" ~ identifier ~ NEWLINE* }
+
+// ui_statement نهایی
+
+// Style block: { color: "#fff", size: 24 }
+style_block = { "{" ~ NEWLINE* ~ (style_property ~ NEWLINE*)* ~ "}" }
+style_property = { identifier ~ ":" ~ style_value }
+style_value = _{ style_string | style_number | style_bool | identifier }
+style_string = ${ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+style_number = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }
+style_bool = { "true" | "false" }
