@@ -1,0 +1,131 @@
+program = { SOI ~ NEWLINE* ~ agent_header ~ top_level_item* ~ EOI }
+
+agent_header = { "agent" ~ identifier ~ NEWLINE }
+
+top_level_item = _{ secrets_block | model_decl | import_stmt | fn_decl }
+
+import_stmt = { "import" ~ string_literal ~ alias? ~ NEWLINE }
+alias       = { "as" ~ identifier }
+
+secrets_block = { "secrets" ~ "{" ~ NEWLINE ~ secrets_entry* ~ "}" ~ NEWLINE }
+secrets_entry = { identifier ~ ":" ~ secret_value ~ NEWLINE }
+
+secret_value = _{ env_call | string_literal }
+env_call     = { "env" ~ "(" ~ string_literal ~ ")" }
+
+model_decl  = { "model" ~ identifier ~ "{" ~ NEWLINE ~ model_field* ~ "}" ~ NEWLINE }
+model_field = _{ retry_block | capabilities_block | model_property }
+model_property = { identifier ~ ":" ~ literal ~ NEWLINE }
+
+retry_block  = { "retry" ~ "{" ~ NEWLINE ~ retry_field* ~ "}" ~ NEWLINE }
+retry_field  = _{ retry_property | retry_on }
+retry_property = { identifier ~ ":" ~ literal ~ NEWLINE }
+retry_on       = { "on" ~ ":" ~ array_literal ~ NEWLINE }
+
+capabilities_block = { "capabilities" ~ "{" ~ NEWLINE ~ model_property* ~ "}" ~ NEWLINE }
+
+string_literal = ${ "\"" ~ string_inner ~ "\"" }
+string_inner   = @{ (!("\"" | "\\") ~ ANY | "\\" ~ ANY)* }
+raw_string = ${ "r\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+
+int_literal   = @{ "0x" ~ ASCII_HEX_DIGIT+ | ASCII_DIGIT+ }
+float_literal = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ ~ (("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+)? }
+bool_literal  = { "true" | "false" }
+
+duration_literal = { int_literal ~ duration_unit }
+duration_unit    = @{ "ms" | "s" | "m" | "h" | "d" }
+byte_size_literal = { int_literal ~ byte_size_unit }
+byte_size_unit    = @{ "KB" | "MB" | "GB" }
+
+uuid_literal = @{
+    ASCII_HEX_DIGIT{8} ~ "-" ~ ASCII_HEX_DIGIT{4} ~ "-" ~
+    ASCII_HEX_DIGIT{4} ~ "-" ~ ASCII_HEX_DIGIT{4} ~ "-" ~ ASCII_HEX_DIGIT{12}
+}
+
+literal = _{ float_literal | int_literal | duration_literal | byte_size_literal
+          | uuid_literal | bool_literal | raw_string | string_literal | "none" }
+
+array_literal = { "[" ~ NEWLINE? ~ (literal ~ ("," ~ NEWLINE? ~ literal)* ~ ","?)? ~ NEWLINE? ~ "]" }
+
+// ---------- Expressions ----------
+
+expr = { comparison_expr }
+
+comparison_expr = { additive_expr ~ (comparison_op ~ additive_expr)* }
+comparison_op   = { "==" | "!=" | "<=" | ">=" | "<" | ">" }
+
+additive_expr   = { multiplicative_expr ~ (additive_op ~ multiplicative_expr)* }
+additive_op     = { "+" | "-" }
+
+multiplicative_expr = { unary_expr ~ (multiplicative_op ~ unary_expr)* }
+multiplicative_op   = { "*" | "/" | "%" }
+
+unary_expr      = { unary_op? ~ postfix_expr }
+unary_op        = { "not" | "!" | "-" }
+
+postfix_expr    = { primary_expr ~ postfix_op* }
+postfix_op      = _{ call_op | member_op | index_op }
+
+call_op         = { "(" ~ arg_list? ~ ")" }
+member_op       = { "." ~ identifier }
+index_op        = { "[" ~ expr ~ "]" }
+
+primary_expr    = _{ paren_expr | array_expr | object_expr | await_expr | match_expr | literal | identifier }
+
+paren_expr      = { "(" ~ expr ~ ")" }
+array_expr      = { "[" ~ (expr ~ ("," ~ expr)*)? ~ "]" }
+object_expr     = { "{" ~ NEWLINE? ~ (object_field ~ ("," ~ NEWLINE? ~ object_field)* ~ ","?)? ~ NEWLINE? ~ "}" }
+object_field    = { identifier ~ ":" ~ expr }
+await_expr      = { "await" ~ expr }
+
+match_expr  = { "match" ~ expr ~ "{" ~ NEWLINE? ~ match_arm+ ~ "}" }
+match_arm   = { pattern ~ "->" ~ (block | expr) ~ NEWLINE? }
+
+pattern = _{ wildcard_pattern | some_pattern | none_pattern | literal_pattern | identifier }
+wildcard_pattern = { "_" }
+some_pattern     = { "some" ~ "(" ~ identifier ~ ")" }
+none_pattern     = { "none" }
+literal_pattern  = { literal }
+
+arg_list        = { argument ~ ("," ~ argument)* }
+argument        = { (identifier ~ ":")? ~ expr }
+
+// ---------- Functions ----------
+
+fn_decl = { "fn" ~ identifier ~ "(" ~ param_list? ~ ")" ~ return_type? ~ block ~ NEWLINE* }
+
+param_list = { param ~ ("," ~ param)* }
+param = { identifier ~ ":" ~ base_type ~ ("=" ~ expr)? }
+
+return_type = { "->" ~ full_type }
+base_type = _{ array_type | primitive_type | named_type }
+full_type = { base_type ~ "?"? }
+
+primitive_type = @{ "string" | "int" | "float" | "bool" | "bytes" | "unit" | "uuid" | "timestamp" }
+named_type     = { identifier }
+array_type     = { "[" ~ base_type ~ "]" }
+
+block = { "{" ~ NEWLINE* ~ (statement ~ stmt_sep?)* ~ "}" }
+stmt_sep = _{ NEWLINE+ | &"}" }
+
+// ---------- Statements ----------
+
+statement = _{ if_stmt | while_stmt | for_stmt | let_stmt | assign_stmt | return_stmt | expr_stmt }
+
+if_stmt = { "if" ~ expr ~ block ~ else_clause? }
+else_clause = { NEWLINE* ~ "else" ~ (if_stmt | block) }
+while_stmt = { "while" ~ expr ~ block }
+for_stmt = { "for" ~ identifier ~ "in" ~ expr ~ block }
+
+let_stmt    = { "let" ~ identifier ~ (":" ~ base_type ~ "?"?)? ~ "=" ~ expr }
+assign_stmt = { lvalue ~ assign_op ~ expr }
+lvalue      = { identifier ~ (member_op | index_op)* }
+assign_op   = { "=" | "+=" | "-=" | "*=" | "/=" }
+return_stmt = { "return" ~ expr? }
+expr_stmt   = { expr }
+
+identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+
+WHITESPACE = _{ " " | "\t" }
+COMMENT    = _{ "#" ~ (!NEWLINE ~ ANY)* }
+NEWLINE    = _{ ("\n" | "\r\n")+ }

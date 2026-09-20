@@ -1,0 +1,19 @@
+[package]
+name = "aec-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Command-line interface for AEC"
+
+[[bin]]
+name = "aec"
+path = "src/main.rs"
+
+[dependencies]
+aec-ast = { path = "../aec-ast" }
+aec-parser = { path = "../aec-parser" }
+aec-runtime = { path = "../aec-runtime" }
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+colored = "2.1"

@@ -1,0 +1,17 @@
+[package]
+name = "aec-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Parser for the AEC language"
+
+[dependencies]
+aec-ast = { path = "../aec-ast" }
+pest.workspace = true
+pest_derive.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true

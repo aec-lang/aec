@@ -1,0 +1,32 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# AEC
+*.aecdump
+.env
+.env.local
+.aec-token
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Local scripts
+fix.sh
+fix2.sh
+setup.sh
+report.html
+rebuild.sh
