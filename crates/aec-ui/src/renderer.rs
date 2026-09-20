@@ -1,54 +1,161 @@
 //! Native renderer — تبدیل widget tree به egui
-//!
-//! از egui استفاده می‌کنه (بالای wgpu).
-//! GPU-accelerated، cross-platform.
+//! با اتصال به Interpreter AEC
 
-use aec_ast::UiDecl;
-use crate::widgets::{build_widgets, Widget, UiState};
+use aec_ast::{Program, UiDecl, Span};
+use aec_runtime::{Interpreter, Value};
+use crate::widgets::{build_widgets, Widget, UiState, UiValue};
 use eframe::egui;
+use std::sync::{Arc, Mutex};
 
 pub struct AecApp {
-    pub screen_title: String,
+    pub program: Program,
+    pub interpreter: Arc<Mutex<Interpreter>>,
+    pub ui_decl: UiDecl,
     pub widgets: Vec<Widget>,
     pub state: UiState,
-    pub pending_calls: Vec<String>,
+    pub pending_events: Vec<String>,
 }
 
 impl AecApp {
-    pub fn new(ui: &UiDecl) -> Self {
+    pub fn new(program: Program, ui: UiDecl) -> Result<Self, String> {
+        let mut interpreter = Interpreter::new();
+
+        // ثبت توابع
+        interpreter.run(&program).map_err(|e| e.to_string())?;
+
         let mut state = UiState::new();
+
+        // ساخت widgets اولیه
         let widgets = build_widgets(&ui.screen.body, &mut state);
 
-        Self {
-            screen_title: ui.screen.title.clone(),
+        // State ها رو به interpreter پاس بده
+        sync_state_to_interpreter(&state, &mut interpreter);
+
+        Ok(Self {
+            program: program.clone(),
+            interpreter: Arc::new(Mutex::new(interpreter)),
+            ui_decl: ui.clone(),
             widgets,
             state,
-            pending_calls: Vec::new(),
+            pending_events: Vec::new(),
+        })
+    }
+
+    fn execute_event(&mut self, fn_name: &str) {
+        // 1. State رو به interpreter بفرست (فقط متغیرهای state)
+        {
+            let mut interp = self.interpreter.lock().unwrap();
+            sync_state_to_interpreter(&self.state, &mut interp);
         }
+
+        // 2. تابع AEC رو اجرا کن
+        let result = {
+            let mut interp = self.interpreter.lock().unwrap();
+            interp.call_function(fn_name, vec![], Span::dummy())
+        };
+
+        match result {
+            Ok(_) => {
+                eprintln!("[UI] ✅ Executed AEC function: {}", fn_name);
+            }
+            Err(e) => {
+                eprintln!("[UI] ❌ Error executing {}: {}", fn_name, e);
+            }
+        }
+
+        // 3. State رو از interpreter بگیر (فقط متغیرهای state)
+        {
+            let interp = self.interpreter.lock().unwrap();
+            sync_state_from_interpreter(&mut self.state, &interp);
+        }
+
+        // 4. Widget ها رو دوباره بساز
+        let mut new_state = self.state.clone();
+        self.widgets = build_widgets(&self.ui_decl.screen.body, &mut new_state);
+        self.state = new_state;
+    }
+}
+
+/// State رو از UiState به Interpreter پاس بده
+fn sync_state_to_interpreter(state: &UiState, interp: &mut Interpreter) {
+    for (name, value) in &state.values {
+        let aec_value = ui_value_to_aec_value(value);
+        interp.global.borrow_mut().set(name.clone(), aec_value);
+    }
+}
+
+/// State رو از Interpreter به UiState بگیر
+fn sync_state_from_interpreter(state: &mut UiState, interp: &Interpreter) {
+    let env = interp.global.borrow();
+
+    // فقط متغیرهایی که توی UiState هستن رو update کن
+    let state_names: Vec<String> = state.values.keys().cloned().collect();
+
+    for name in state_names {
+        if let Some(value) = env.get(&name) {
+            let ui_value = aec_value_to_ui_value(&value);
+            state.values.insert(name.clone(), ui_value);
+        }
+    }
+}
+
+fn ui_value_to_aec_value(v: &UiValue) -> Value {
+    match v {
+        UiValue::String(s) => Value::String(s.clone()),
+        UiValue::Int(n) => Value::Int(*n),
+        UiValue::Float(f) => Value::Float(*f),
+        UiValue::Bool(b) => Value::Bool(*b),
+        UiValue::Array(arr) => {
+            let items: Vec<Value> = arr.iter().map(ui_value_to_aec_value).collect();
+            Value::Array(items)
+        }
+        UiValue::Object(obj) => {
+            let mut map = std::collections::HashMap::new();
+            for (k, v) in obj {
+                map.insert(k.clone(), ui_value_to_aec_value(v));
+            }
+            Value::Object(map)
+        }
+    }
+}
+
+fn aec_value_to_ui_value(v: &Value) -> UiValue {
+    match v {
+        Value::String(s) => UiValue::String(s.clone()),
+        Value::Int(n) => UiValue::Int(*n),
+        Value::Float(f) => UiValue::Float(*f),
+        Value::Bool(b) => UiValue::Bool(*b),
+        Value::Array(arr) => {
+            let items: Vec<UiValue> = arr.iter().map(aec_value_to_ui_value).collect();
+            UiValue::Array(items)
+        }
+        Value::Object(obj) => {
+            let mut map = std::collections::HashMap::new();
+            for (k, v) in obj {
+                map.insert(k.clone(), aec_value_to_ui_value(v));
+            }
+            UiValue::Object(map)
+        }
+        _ => UiValue::String(String::new()),
     }
 }
 
 impl eframe::App for AecApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let mut pending = Vec::new();
+
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading(&self.screen_title);
+            ui.heading(&self.ui_decl.screen.title);
             ui.add_space(16.0);
 
             let widgets = self.widgets.clone();
-            let mut pending = Vec::new();
             render_widgets(ui, &widgets, &mut self.state, &mut pending);
-
-            // Event ها رو جمع کن
-            self.pending_calls.extend(pending);
-
-            // اگه event داریم، تابع AEC رو صدا بزن
-            if !self.pending_calls.is_empty() {
-                let calls = std::mem::take(&mut self.pending_calls);
-                for call in calls {
-                    eprintln!("[UI] Calling AEC function: {}", call);
-                }
-            }
         });
+
+        // اگه event داریم، همون‌جا اجرا کن
+        for event in pending {
+            self.execute_event(&event);
+        }
     }
 }
 
@@ -161,8 +268,12 @@ fn render_widget(
 }
 
 /// اجرای یه UI
-pub fn run_ui(ui: &UiDecl) -> Result<(), eframe::Error> {
-    let app = AecApp::new(ui);
+pub fn run_ui(program: &Program, ui: &UiDecl) -> Result<(), eframe::Error> {
+    let app = AecApp::new(program.clone(), ui.clone())
+        .map_err(|e| eframe::Error::AppCreation(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other, e
+        ))))?;
+
     let title = ui.screen.title.clone();
 
     let options = eframe::NativeOptions {

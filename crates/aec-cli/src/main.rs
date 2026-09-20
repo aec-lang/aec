@@ -130,7 +130,7 @@ fn cmd_run(file: &PathBuf, entry: &str, force_cli: bool) -> Result<()> {
         println!();
 
         let ui = ui_decls[0];
-        match aec_ui::run_ui(ui) {
+        match aec_ui::run_ui(&program, ui) {
             Ok(_) => {
                 println!();
                 println!("{}", "✅ Window closed".green().bold());
