@@ -158,8 +158,8 @@ primary_arg = _{ string_literal | int_literal | float_literal | bool_literal }
 element_modifier = _{ element_property | binding | event_handler }
 
 element_property = { identifier ~ ":" ~ expr }
-binding = { "bind" ~ identifier ~ "to" ~ identifier ~ (member_op | call_op)* ~ NEWLINE* }
-event_handler = { "on" ~ identifier ~ "->" ~ identifier ~ (member_op | call_op)* ~ NEWLINE* }
+binding = { "bind" ~ identifier ~ "to" ~ identifier ~ (member_op | call_op)* ~ NEWLINE+ }
+event_handler = { "on" ~ identifier ~ "->" ~ identifier ~ (member_op | call_op)* ~ NEWLINE+ }
 
 element_children = { "{" ~ NEWLINE* ~ ui_statement* ~ NEWLINE* ~ "}" }
 
