@@ -14,6 +14,7 @@ path = "src/main.rs"
 aec-ast = { path = "../aec-ast" }
 aec-parser = { path = "../aec-parser" }
 aec-runtime = { path = "../aec-runtime" }
+aec-ui = { path = "../aec-ui" }
 clap = { version = "4.5", features = ["derive"] }
 anyhow = "1.0"
 colored = "2.1"

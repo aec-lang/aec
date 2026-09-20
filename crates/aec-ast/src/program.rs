@@ -2,6 +2,7 @@ use crate::declarative::SecretsBlock;
 use crate::function::FunctionDecl;
 use crate::model::ModelDecl;
 use crate::span::Span;
+use crate::ui::UiDecl;
 
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -34,6 +35,7 @@ pub enum TopLevelItem {
     Model(ModelDecl),
     Import(ImportStmt),
     Function(FunctionDecl),
+    Ui(UiDecl),
 }
 
 #[derive(Debug, Clone)]

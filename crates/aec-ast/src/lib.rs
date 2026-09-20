@@ -6,6 +6,7 @@ pub mod declarative;
 pub mod model;
 pub mod expr;
 pub mod function;
+pub mod ui;
 
 pub use span::{Span, Position, Spanned};
 pub use error::{ParseError, ParseErrorKind};
@@ -22,4 +23,8 @@ pub use function::{
     FunctionDecl, Parameter, Block, Statement, LetStmt, AssignStmt, AssignOp,
     LValue, LValueStep, ReturnStmt,
     IfStmt, ElseBranch, WhileStmt, ForStmt, TypeExpr,
+};
+pub use ui::{
+    UiDecl, ScreenExpr, UiStatement, StateDeclUi, ElementExpr, ElementModifier,
+    ElementProperty, Binding, EventHandler, UiIf, UiFor, TypeRef,
 };

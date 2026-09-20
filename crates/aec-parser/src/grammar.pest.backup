@@ -2,7 +2,7 @@ program = { SOI ~ NEWLINE* ~ agent_header ~ top_level_item* ~ EOI }
 
 agent_header = { "agent" ~ identifier ~ NEWLINE }
 
-top_level_item = _{ secrets_block | model_decl | import_stmt | fn_decl | ui_decl }
+top_level_item = _{ secrets_block | model_decl | import_stmt | fn_decl }
 
 import_stmt = { "import" ~ string_literal ~ alias? ~ NEWLINE }
 alias       = { "as" ~ identifier }
@@ -129,45 +129,3 @@ identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
 WHITESPACE = _{ " " | "\t" }
 COMMENT    = _{ "#" ~ (!NEWLINE ~ ANY)* }
 NEWLINE    = _{ ("\n" | "\r\n")+ }
-
-// ============================================================
-// UI DSL — Sprint A2
-// ============================================================
-
-// ui Main = Screen "Title" { ... }
-ui_decl = { "ui" ~ identifier ~ "=" ~ screen_expr ~ NEWLINE* }
-
-screen_expr = { "Screen" ~ string_literal ~ block_ui }
-
-block_ui = { "{" ~ NEWLINE* ~ ui_statement* ~ NEWLINE* ~ "}" }
-
-ui_statement = _{ state_decl_ui | element_expr | ui_if | ui_for }
-
-// @message: string = ""
-state_decl_ui = { "@" ~ identifier ~ (":" ~ base_type)? ~ "=" ~ expr ~ NEWLINE* }
-
-// Text "Hello"
-// Button "Send" on click -> do_this()
-// Column { ... }
-element_expr = { element_name ~ primary_arg? ~ element_modifier* ~ element_children? ~ NEWLINE* }
-
-element_name = @{ ('A'..'Z') ~ (ASCII_ALPHANUMERIC | "_")* }
-
-primary_arg = _{ string_literal | int_literal | float_literal | bool_literal }
-
-element_modifier = _{ element_property | binding | event_handler }
-
-element_property = { identifier ~ ":" ~ expr }
-binding = { "bind" ~ identifier ~ "to" ~ identifier ~ (member_op | call_op)* ~ NEWLINE* }
-event_handler = { "on" ~ identifier ~ "->" ~ identifier ~ (member_op | call_op)* ~ NEWLINE* }
-
-element_children = { "{" ~ NEWLINE* ~ ui_statement* ~ NEWLINE* ~ "}" }
-
-// if cond { ... } در UI
-ui_if = { "if" ~ expr ~ block_ui ~ ("else" ~ block_ui)? ~ NEWLINE* }
-
-// for item in items { ... } در UI
-ui_for = { "for" ~ identifier ~ "in" ~ expr ~ block_ui ~ NEWLINE* }
-
-// مسیر expression بدون NEWLINE (برای bind و on)
-expression_path = { identifier ~ (member_op | call_op)* }

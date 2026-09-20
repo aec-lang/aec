@@ -1,0 +1,13 @@
+[package]
+name = "aec-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Native UI renderer for AEC (GPU-based)"
+
+[dependencies]
+aec-ast = { path = "../aec-ast" }
+aec-runtime = { path = "../aec-runtime" }
+egui.workspace = true
+eframe.workspace = true

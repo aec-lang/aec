@@ -4,6 +4,8 @@ use colored::*;
 use std::fs;
 use std::path::PathBuf;
 
+use aec_ast::TopLevelItem;
+
 #[derive(Parser)]
 #[command(name = "aec")]
 #[command(version = "0.1.0")]
@@ -17,21 +19,21 @@ struct Cli {
 enum Commands {
     /// Check if an AEC file parses correctly
     Check {
-        /// Path to .aec file
         file: PathBuf,
     },
     /// Print the AST of an AEC file
     Ast {
-        /// Path to .aec file
         file: PathBuf,
     },
     /// Run an AEC file
     Run {
-        /// Path to .aec file
         file: PathBuf,
         /// Function to call (default: main)
         #[arg(short, long, default_value = "main")]
         entry: String,
+        /// Force terminal mode (ignore UI)
+        #[arg(long)]
+        cli: bool,
     },
 }
 
@@ -41,7 +43,7 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Check { file } => cmd_check(&file),
         Commands::Ast { file } => cmd_ast(&file),
-        Commands::Run { file, entry } => cmd_run(&file, &entry),
+        Commands::Run { file, entry, cli: force_cli } => cmd_run(&file, &entry, force_cli),
     }
 }
 
@@ -56,6 +58,14 @@ fn cmd_check(file: &PathBuf) -> Result<()> {
             println!();
             println!("   {} {}", "Agent:".bold(), program.header.name.name.yellow());
             println!("   {} {}", "Items:".bold(), program.items.len());
+
+            let ui_count = program.items.iter()
+                .filter(|i| matches!(i, TopLevelItem::Ui(_)))
+                .count();
+            if ui_count > 0 {
+                println!("   {} {}", "UI blocks:".bold(), ui_count.to_string().cyan());
+            }
+
             println!();
             Ok(())
         }
@@ -91,7 +101,7 @@ fn cmd_ast(file: &PathBuf) -> Result<()> {
     }
 }
 
-fn cmd_run(file: &PathBuf, entry: &str) -> Result<()> {
+fn cmd_run(file: &PathBuf, entry: &str, force_cli: bool) -> Result<()> {
     println!("{} {}", "→ Running".cyan().bold(), file.display());
     println!();
 
@@ -107,35 +117,62 @@ fn cmd_run(file: &PathBuf, entry: &str) -> Result<()> {
         }
     };
 
-    let mut interp = aec_runtime::Interpreter::new();
+    // چک کن UI داریم؟
+    let ui_decls: Vec<_> = program.items.iter()
+        .filter_map(|i| {
+            if let TopLevelItem::Ui(u) = i { Some(u) } else { None }
+        })
+        .collect();
 
-    // ثبت توابع
-    if let Err(err) = interp.run(&program) {
-        println!("{}", "❌ Runtime init failed!".red().bold());
+    if !ui_decls.is_empty() && !force_cli {
+        // UI داریم → پنجره‌ی native باز کن
+        println!("{}", "🎨 UI detected — opening native window...".cyan().bold());
         println!();
-        println!("   {}", err.to_string().red());
-        std::process::exit(1);
-    }
 
-    // فراخوانی تابع entry
-    match interp.call_function(entry, vec![], aec_ast::Span::dummy()) {
-        Ok(value) => {
-            println!();
-            println!("{}", "✅ Program finished!".green().bold());
-            if !matches!(value, aec_runtime::Value::None) {
+        let ui = ui_decls[0];
+        match aec_ui::run_ui(ui) {
+            Ok(_) => {
                 println!();
-                println!("   {} {}", "Result:".bold(), value.to_string().yellow());
+                println!("{}", "✅ Window closed".green().bold());
+                Ok(())
             }
-            println!();
-            Ok(())
+            Err(e) => {
+                println!("{}", "❌ UI error!".red().bold());
+                println!();
+                println!("   {}", e.to_string().red());
+                std::process::exit(1);
+            }
         }
-        Err(err) => {
-            println!();
-            println!("{}", "❌ Runtime error!".red().bold());
+    } else {
+        // CLI mode
+        let mut interp = aec_runtime::Interpreter::new();
+
+        if let Err(err) = interp.run(&program) {
+            println!("{}", "❌ Runtime init failed!".red().bold());
             println!();
             println!("   {}", err.to_string().red());
-            println!();
             std::process::exit(1);
+        }
+
+        match interp.call_function(entry, vec![], aec_ast::Span::dummy()) {
+            Ok(value) => {
+                println!();
+                println!("{}", "✅ Program finished!".green().bold());
+                if !matches!(value, aec_runtime::Value::None) {
+                    println!();
+                    println!("   {} {}", "Result:".bold(), value.to_string().yellow());
+                }
+                println!();
+                Ok(())
+            }
+            Err(err) => {
+                println!();
+                println!("{}", "❌ Runtime error!".red().bold());
+                println!();
+                println!("   {}", err.to_string().red());
+                println!();
+                std::process::exit(1);
+            }
         }
     }
 }
