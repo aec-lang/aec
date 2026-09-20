@@ -976,12 +976,67 @@ fn build_state_decl_ui(pair: Pair<Rule>) -> Result<StateDeclUi, ParseError> {
         value_pair = Some(next);
     }
 
-    let initial = match value_pair {
-        Some(p) => build_expr(p)?,
-        None => return Err(build_error(span, "state needs a value")),
+    let value_pair = value_pair.ok_or_else(|| {
+        build_error(span, "state needs a value")
+    })?;
+
+    // بررسی: آیا state_value است یا expr؟
+    let initial = if value_pair.as_rule() == Rule::state_value {
+        // state_value = _{ array_literal | object_expr | expr }
+        // silent rule — inner رو بگیر
+        let inner_pair = value_pair.into_inner().next().ok_or_else(|| {
+            build_error(span, "empty state value")
+        })?;
+        build_expr_any(inner_pair)?
+    } else {
+        build_expr_any(value_pair)?
     };
 
     Ok(StateDeclUi { name, ty, initial, span })
+}
+
+/// build_expr_any — برای expr یا array_literal یا object_expr
+fn build_expr_any(pair: Pair<Rule>) -> Result<Expr, ParseError> {
+    match pair.as_rule() {
+        Rule::array_literal => {
+            let span = pair_span(&pair);
+            let mut elements = Vec::new();
+            for p in pair.into_inner() {
+                elements.push(build_expr_any(p)?);
+            }
+            Ok(Expr::Array(Box::new(aec_ast::ArrayExpr { elements, span })))
+        }
+        Rule::object_expr => {
+            let span = pair_span(&pair);
+            let mut fields = Vec::new();
+            for p in pair.into_inner() {
+                if p.as_rule() == Rule::object_field {
+                    let mut fi = p.into_inner();
+                    let key = build_identifier(fi.next().unwrap())?;
+                    let value = build_expr_any(fi.next().unwrap())?;
+                    fields.push(aec_ast::ObjectField { key, value, span });
+                }
+            }
+            Ok(Expr::Object(Box::new(aec_ast::ObjectExpr { fields, span })))
+        }
+        Rule::object_field => {
+            let span = pair_span(&pair);
+            let mut fi = pair.into_inner();
+            let key = build_identifier(fi.next().unwrap())?;
+            let value = build_expr_any(fi.next().unwrap())?;
+            Ok(Expr::Object(Box::new(aec_ast::ObjectExpr {
+                fields: vec![aec_ast::ObjectField { key, value, span }],
+                span,
+            })))
+        }
+        Rule::expr | Rule::state_value => {
+            let inner = pair.into_inner().next().ok_or_else(|| {
+                build_error(Span::dummy(), "empty expr")
+            })?;
+            build_expr_any(inner)
+        }
+        _ => build_expr(pair),
+    }
 }
 
 fn build_type_ref(pair: Pair<Rule>) -> Result<TypeRef, ParseError> {

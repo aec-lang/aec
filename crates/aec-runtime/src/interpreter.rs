@@ -367,6 +367,42 @@ impl Interpreter {
             "llm.complete" | "llm_complete" => {
                 return llm::llm_complete(args, span).map(Some);
             }
+            "push_to" => {
+                if args.len() != 2 {
+                    return Err(RuntimeError::WrongArgCount {
+                        expected: 2, got: args.len(), span,
+                    });
+                }
+                let name = match &args[0] {
+                    Value::String(s) => s.clone(),
+                    _ => return Err(RuntimeError::TypeError {
+                        message: "push_to: first arg must be variable name".to_string(),
+                        span,
+                    }),
+                };
+                let item = args[1].clone();
+
+                let mut env = self.global.borrow_mut();
+                let existing = env.get(&name);
+                match existing {
+                    Some(Value::Array(arr)) => {
+                        let mut new_arr = arr.clone();
+                        new_arr.push(item);
+                        env.set(name.clone(), Value::Array(new_arr));
+                        Value::None
+                    }
+                    None => {
+                        env.set(name.clone(), Value::Array(vec![item]));
+                        Value::None
+                    }
+                    _ => {
+                        return Err(RuntimeError::TypeError {
+                            message: format!("push_to: '{}' is not an array", name),
+                            span,
+                        });
+                    }
+                }
+            }
             "memory.add" | "memory_add" => {
                 if args.len() < 3 {
                     return Err(RuntimeError::WrongArgCount {

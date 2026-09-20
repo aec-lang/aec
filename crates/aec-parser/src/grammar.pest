@@ -45,7 +45,8 @@ uuid_literal = @{
 literal = _{ float_literal | int_literal | duration_literal | byte_size_literal
           | uuid_literal | bool_literal | raw_string | string_literal | "none" }
 
-array_literal = { "[" ~ NEWLINE? ~ (literal ~ ("," ~ NEWLINE? ~ literal)* ~ ","?)? ~ NEWLINE? ~ "]" }
+array_literal = { "[" ~ NEWLINE? ~ (array_element ~ ("," ~ NEWLINE? ~ array_element)* ~ ","?)? ~ NEWLINE? ~ "]" }
+array_element = _{ object_expr | literal }
 
 // ---------- Expressions ----------
 
@@ -144,7 +145,8 @@ block_ui = { "{" ~ NEWLINE* ~ ui_statement* ~ NEWLINE* ~ "}" }
 ui_statement = _{ state_decl_ui | display_expr | messages_expr | element_expr | ui_if | ui_for }
 
 // @message: string = ""
-state_decl_ui = { "@" ~ identifier ~ (":" ~ base_type)? ~ "=" ~ expr ~ NEWLINE* }
+state_decl_ui = { "@" ~ identifier ~ (":" ~ base_type)? ~ "=" ~ state_value ~ NEWLINE* }
+state_value = _{ array_literal | object_expr | expr }
 
 // Text "Hello"
 // Button "Send" on click -> do_this()

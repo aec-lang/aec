@@ -71,7 +71,6 @@ pub enum Widget {
     Container(Vec<Widget>),
     MessagesList {
         source: String,
-        items: Vec<MessageItem>,
         style: WidgetStyle,
     },
     If {
@@ -335,21 +334,7 @@ fn build_element(el: &ElementExpr, state: &mut UiState) -> Widget {
                     }
                 }
             }
-            let items = state.get_value(&source)
-                .map(|v| v.as_array())
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|item| {
-                    if let UiValue::Object(o) = item {
-                        let role = o.get("role").map(|v| v.as_string()).unwrap_or_else(|| "user".to_string());
-                        let content = o.get("content").map(|v| v.as_string()).unwrap_or_default();
-                        Some(MessageItem { role, content })
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            Widget::MessagesList { source, items, style: ws }
+            Widget::MessagesList { source, style: ws }
         }
         _ => {
             let children = el.children.as_ref().map(|c| build_widgets(c, state)).unwrap_or_default();

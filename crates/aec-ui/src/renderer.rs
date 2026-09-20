@@ -330,23 +330,49 @@ fn render_widget(ui: &mut egui::Ui, widget: &Widget, state: &mut UiState, pendin
             }
         }
 
-        Widget::MessagesList { source: _, items, style: _ } => {
+        Widget::MessagesList { source, style: _ } => {
+            // items رو زنده از state بگیر
+            let items: Vec<(String, String)> = state.get_value(source)
+                .map(|v| v.as_array())
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|item| {
+                    if let UiValue::Object(o) = item {
+                        let role = o.get("role")
+                            .map(|v| v.as_string())
+                            .unwrap_or_else(|| "user".to_string());
+                        let content = o.get("content")
+                            .map(|v| v.as_string())
+                            .unwrap_or_default();
+                        Some((role, content))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
             if items.is_empty() {
                 ui.label(egui::RichText::new("No messages yet").italics().weak());
             }
-            for item in items {
-                let is_user = item.role == "user";
-                let (label, color) = if is_user {
-                    ("👤 You", egui::Color32::from_rgb(102, 126, 234))
-                } else {
-                    ("🤖 AI", egui::Color32::from_rgb(168, 224, 32))
-                };
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.label(egui::RichText::new(label).strong().color(color));
-                    ui.label(egui::RichText::new(&item.content));
+
+            egui::ScrollArea::vertical()
+                .id_source(format!("messages_{}", source))
+                .max_height(400.0)
+                .show(ui, |ui| {
+                    for (role, content) in items {
+                        let is_user = role == "user";
+                        let (label, color) = if is_user {
+                            ("👤 You", egui::Color32::from_rgb(102, 126, 234))
+                        } else {
+                            ("🤖 AI", egui::Color32::from_rgb(168, 224, 32))
+                        };
+                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                            ui.label(egui::RichText::new(label).strong().color(color));
+                            ui.label(egui::RichText::new(&content));
+                        });
+                        ui.add_space(4.0);
+                    }
                 });
-                ui.add_space(4.0);
-            }
         }
 
         Widget::If { condition, then_branch, else_branch } => {
