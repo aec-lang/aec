@@ -12,3 +12,7 @@ thiserror.workspace = true
 uuid.workspace = true
 reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false }
 serde_json = "1.0"
+regex = "1.10"
+md5 = "0.7"
+sha2 = "0.10"
+base64 = "0.22"

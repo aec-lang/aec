@@ -109,6 +109,9 @@ impl Interpreter {
         if let Some(v) = crate::stdlib::call_builtin2(name, args, span)? {
             return Ok(Some(v));
         }
+        if let Some(v) = crate::stdlib_extended::call_extended(name, args, span)? {
+            return Ok(Some(v));
+        }
         // بعد built-in های داخلی
         let result = match name {
             "print" => {

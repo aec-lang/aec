@@ -6,6 +6,7 @@ pub mod interpreter;
 pub mod llm;
 pub mod memory;
 pub mod stdlib;
+pub mod stdlib_extended;
 
 pub use errors::RuntimeError;
 pub use value::{Value, Environment, Env, Function};
