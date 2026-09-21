@@ -14,6 +14,9 @@ Thumbs.db
 
 # AEC
 *.aecdump
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
 .env
 .env.local
 .aec-token

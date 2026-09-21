@@ -1,0 +1,14 @@
+[package]
+name = "aec-check"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Static type checker for the AEC language"
+
+[dependencies]
+aec-ast = { path = "../aec-ast" }
+
+[dev-dependencies]
+aec-parser = { path = "../aec-parser" }
+pretty_assertions.workspace = true

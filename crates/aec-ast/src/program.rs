@@ -1,8 +1,10 @@
 use crate::declarative::SecretsBlock;
 use crate::function::FunctionDecl;
 use crate::model::ModelDecl;
+use crate::permissions::{LimitsBlock, PermissionsBlock};
 use crate::span::Span;
-use crate::ui::UiDecl;
+use crate::theme::ThemeDecl;
+use crate::ui::{ComponentDecl, UiDecl};
 
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -25,16 +27,23 @@ pub struct Identifier {
 
 impl Identifier {
     pub fn new(name: impl Into<String>, span: Span) -> Self {
-        Self { name: name.into(), span }
+        Self {
+            name: name.into(),
+            span,
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum TopLevelItem {
     Secrets(SecretsBlock),
+    Permissions(PermissionsBlock),
+    Limits(LimitsBlock),
     Model(ModelDecl),
     Import(ImportStmt),
     Function(FunctionDecl),
+    Component(ComponentDecl),
+    Theme(ThemeDecl),
     Ui(UiDecl),
 }
 

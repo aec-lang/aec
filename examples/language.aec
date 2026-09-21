@@ -1,0 +1,39 @@
+# Language basics: `let` vs `var`, string interpolation, `for`, `while`
+#
+# Run:
+#   aec run examples/language.aec --cli --entry main
+#
+# `let` bindings are immutable; `var` bindings can be reassigned. Assigning to a
+# `let` binding is a type error, not a silent no-op.
+
+agent LanguageDemo
+
+fn sum_to(n: int) -> int {
+    var total = 0
+    var i = 1
+    while i <= n {
+        total += i
+        i += 1
+    }
+    return total
+}
+
+fn label(name: string, count: int) -> string {
+    return "{name} has {count} item(s)"
+}
+
+fn main() -> int {
+    let items = ["a", "b", "c"]
+
+    # interpolation evaluates any expression inside the braces
+    print("sum_to(5) = {sum_to(5)}")
+    print(label("cart", len(items)))
+
+    var report = ""
+    for item in items {
+        report += "[" + item + "]"
+    }
+    print("report =", report)
+
+    return 0
+}

@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 aec-ast = { path = "../aec-ast" }
 aec-parser = { path = "../aec-parser" }
+aec-check = { path = "../aec-check" }
 aec-runtime = { path = "../aec-runtime" }
 aec-ui = { path = "../aec-ui" }
 clap = { version = "4.5", features = ["derive"] }

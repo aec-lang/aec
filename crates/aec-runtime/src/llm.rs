@@ -1,11 +1,11 @@
-//! LLM Adapter — اتصال به OpenAI (و هر API سازگار)
+//! LLM Adapter — connecting to OpenAI (and any compatible API)
 
 use crate::errors::RuntimeError;
 use crate::value::Value;
 use aec_ast::Span;
 use std::collections::HashMap;
 
-/// فراخوانی OpenAI-compatible API
+/// Call an OpenAI-compatible API
 pub fn llm_complete(
     args: &[Value],
     span: Span,
@@ -18,7 +18,7 @@ pub fn llm_complete(
         });
     }
 
-    // پارامترها
+    // parameters
     let mut prompt = String::new();
     let mut system = String::from("You are a helpful assistant.");
     let mut model = String::from("gpt-4o-mini");
@@ -27,7 +27,7 @@ pub fn llm_complete(
     let mut api_key: Option<String> = None;
     let mut base_url = String::from("https://api.openai.com/v1");
 
-    // آرگومان اول: یا string (prompt) یا object
+    // first argument: either a string (prompt) or an object
     match &args[0] {
         Value::String(s) => {
             prompt = s.clone();
@@ -70,7 +70,7 @@ pub fn llm_complete(
         }
     }
 
-    // اگه api_key پاس نشده، از env بگیر
+    // if api_key wasn't passed, take it from the env
     let api_key = match api_key {
         Some(k) => k,
         None => std::env::var("OPENAI_API_KEY").map_err(|_| RuntimeError::Generic {
@@ -87,7 +87,7 @@ pub fn llm_complete(
         });
     }
 
-    // ساخت request body
+    // build the request body
     let body = serde_json::json!({
         "model": model,
         "messages": [
@@ -98,7 +98,7 @@ pub fn llm_complete(
         "max_tokens": max_tokens
     });
 
-    // ارسال HTTP request
+    // send the HTTP request
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()
@@ -133,7 +133,7 @@ pub fn llm_complete(
         });
     }
 
-    // پارس پاسخ
+    // parse the response
     let json: serde_json::Value = serde_json::from_str(&response_text).map_err(|e| {
         RuntimeError::Generic {
             message: format!("invalid JSON from API: {}", e),
@@ -141,13 +141,13 @@ pub fn llm_complete(
         }
     })?;
 
-    // استخراج متن
+    // extract the text
     let text = json["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("")
         .to_string();
 
-    // استخراج token usage
+    // extract token usage
     let prompt_tokens = json["usage"]["prompt_tokens"].as_i64().unwrap_or(0);
     let completion_tokens = json["usage"]["completion_tokens"].as_i64().unwrap_or(0);
     let total_tokens = json["usage"]["total_tokens"].as_i64().unwrap_or(0);
@@ -157,7 +157,7 @@ pub fn llm_complete(
         .to_string();
     let model_used = json["model"].as_str().unwrap_or(&model).to_string();
 
-    // ساخت object نتیجه
+    // build the result object
     let mut result = HashMap::new();
     result.insert("text".to_string(), Value::String(text));
     result.insert("model".to_string(), Value::String(model_used));

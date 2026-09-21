@@ -6,6 +6,9 @@ use std::path::PathBuf;
 
 use aec_ast::TopLevelItem;
 
+mod render;
+use render::{render as render_diag, Level};
+
 #[derive(Parser)]
 #[command(name = "aec")]
 #[command(version = "0.1.0")]
@@ -47,6 +50,30 @@ fn main() -> Result<()> {
     }
 }
 
+/// A readable message for a parse error (without a duplicated prefix).
+fn parse_error_message(kind: &aec_ast::ParseErrorKind) -> String {
+    match kind {
+        aec_ast::ParseErrorKind::BuildError { message } => message.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Prints one diagnostic with its source snippet and caret.
+fn print_diag(source: &str, level: Level, message: &str, span: aec_ast::Span) {
+    let block = render_diag(source, level, message, span);
+    for (i, line) in block.lines().enumerate() {
+        if i == 0 {
+            let text = format!("   {}", line);
+            match level {
+                Level::Error => println!("{}", text.red()),
+                Level::Warning => println!("{}", text.yellow()),
+            }
+        } else {
+            println!("   {}", line.dimmed());
+        }
+    }
+}
+
 fn cmd_check(file: &PathBuf) -> Result<()> {
     println!("{} {}", "→ Checking".cyan().bold(), file.display());
 
@@ -66,6 +93,10 @@ fn cmd_check(file: &PathBuf) -> Result<()> {
                 println!("   {} {}", "UI blocks:".bold(), ui_count.to_string().cyan());
             }
 
+            if !run_type_check(&source, &program) {
+                std::process::exit(1);
+            }
+
             println!();
             Ok(())
         }
@@ -73,10 +104,56 @@ fn cmd_check(file: &PathBuf) -> Result<()> {
             println!();
             println!("{}", "❌ Parse failed!".red().bold());
             println!();
-            println!("   {}", err.to_string().red());
+            print_diag(&source, Level::Error, &parse_error_message(&err.kind), err.span);
             println!();
             std::process::exit(1);
         }
+    }
+}
+
+/// Runs and prints the type check. Returns `false` when there is any error.
+fn run_type_check(source: &str, program: &aec_ast::Program) -> bool {
+    let diags = aec_check::check_program(program);
+    let errors = diags.iter().filter(|d| d.is_error()).count();
+    let warnings = diags.len() - errors;
+
+    if !diags.is_empty() {
+        for d in &diags {
+            println!();
+            let level = if d.is_error() {
+                Level::Error
+            } else {
+                Level::Warning
+            };
+            print_diag(source, level, &d.message, d.span);
+        }
+    }
+
+    if errors > 0 {
+        println!();
+        println!(
+            "{}",
+            format!(
+                "❌ Type check failed! ({} error(s), {} warning(s))",
+                errors, warnings
+            )
+            .red()
+            .bold()
+        );
+        false
+    } else if warnings > 0 {
+        println!();
+        println!(
+            "{}",
+            format!("⚠️  Type check passed with {} warning(s)", warnings)
+                .yellow()
+                .bold()
+        );
+        true
+    } else {
+        println!();
+        println!("{}", "✅ Type check passed".green());
+        true
     }
 }
 
@@ -94,7 +171,7 @@ fn cmd_ast(file: &PathBuf) -> Result<()> {
             println!();
             println!("{}", "❌ Parse failed!".red().bold());
             println!();
-            println!("   {}", err.to_string().red());
+            print_diag(&source, Level::Error, &parse_error_message(&err.kind), err.span);
             println!();
             std::process::exit(1);
         }
@@ -111,13 +188,18 @@ fn cmd_run(file: &PathBuf, entry: &str, force_cli: bool) -> Result<()> {
         Err(err) => {
             println!("{}", "❌ Parse failed!".red().bold());
             println!();
-            println!("   {}", err.to_string().red());
+            print_diag(&source, Level::Error, &parse_error_message(&err.kind), err.span);
             println!();
             std::process::exit(1);
         }
     };
 
-    // چک کن UI داریم؟
+    // Gate: a program with type errors must not execute.
+    if !run_type_check(&source, &program) {
+        std::process::exit(1);
+    }
+
+    // Is there a UI declaration?
     let ui_decls: Vec<_> = program.items.iter()
         .filter_map(|i| {
             if let TopLevelItem::Ui(u) = i { Some(u) } else { None }
@@ -125,7 +207,7 @@ fn cmd_run(file: &PathBuf, entry: &str, force_cli: bool) -> Result<()> {
         .collect();
 
     if !ui_decls.is_empty() && !force_cli {
-        // UI داریم → پنجره‌ی native باز کن
+        // There is a UI -> open a native window
         println!("{}", "🎨 UI detected — opening native window...".cyan().bold());
         println!();
 

@@ -1,4 +1,4 @@
-//! مقادیر Runtime
+//! Runtime values
 
 use std::collections::HashMap;
 use std::fmt;
@@ -15,6 +15,22 @@ pub enum Value {
     Array(Vec<Value>),
     Object(HashMap<String, Value>),
     Function(Rc<Function>),
+    /// A lambda value (`x => expr`).
+    Closure(Rc<Closure>),
+    /// `ok(value)` / `err(value)` — see the `?` operator.
+    Result(std::result::Result<Box<Value>, Box<Value>>),
+}
+
+impl Value {
+    /// Builds `ok(value)`.
+    pub fn ok(value: Value) -> Self {
+        Value::Result(Ok(Box::new(value)))
+    }
+
+    /// Builds `err(value)`.
+    pub fn err(value: Value) -> Self {
+        Value::Result(Err(Box::new(value)))
+    }
 }
 
 #[derive(Debug)]
@@ -22,6 +38,14 @@ pub struct Function {
     pub name: String,
     pub params: Vec<String>,
     pub body: aec_ast::Block,
+    pub env: Env,
+}
+
+/// An anonymous function from `x => expr`, with its captured environment.
+#[derive(Debug)]
+pub struct Closure {
+    pub params: Vec<String>,
+    pub body: aec_ast::Expr,
     pub env: Env,
 }
 
@@ -89,6 +113,8 @@ impl Value {
             Value::Array(_) => "array",
             Value::Object(_) => "object",
             Value::Function(_) => "function",
+            Value::Closure(_) => "function",
+            Value::Result(_) => "result",
         }
     }
 
@@ -134,6 +160,9 @@ impl fmt::Display for Value {
                 write!(f, "}}")
             }
             Value::Function(func) => write!(f, "<fn {}>", func.name),
+            Value::Closure(_) => write!(f, "<lambda>"),
+            Value::Result(Ok(v)) => write!(f, "ok({})", v),
+            Value::Result(Err(e)) => write!(f, "err({})", e),
         }
     }
 }

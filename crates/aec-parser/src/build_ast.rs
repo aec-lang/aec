@@ -1,16 +1,16 @@
 use crate::errors::build_error;
 use crate::Rule;
 use aec_ast::{
-    Style, StyleValue,
-    AgentHeader, Argument, ArrayExpr, AssignOp, AssignStmt, AwaitExpr,
-    BinaryExpr, BinaryOp, Block, CallExpr, ElseBranch, Expr, ForStmt,
-    FunctionDecl, Identifier, IfStmt, ImportStmt, IndexExpr, LValue,
-    LValueStep, LetStmt, Literal, LiteralExpr, MatchArm, MatchBody,
-    MatchExpr, MemberExpr, ModelDecl, ModelField, ModelProperty,
-    ObjectExpr, ObjectField, Parameter, ParenExpr, ParseError, Pattern,
-    Position, Program, RetryBlock, RetryField, ReturnStmt, SecretValue,
-    SecretsBlock, SecretsEntry, Span, Statement as AstStatement,
-    TopLevelItem, TypeExpr, UnaryExpr, UnaryOp, WhileStmt,
+    AgentHeader, Argument, ArrayExpr, AssignOp, AssignStmt, AwaitExpr, BinaryExpr, BinaryOp, Block,
+    CallExpr, ComponentDecl, ComponentProp, ComponentUse, ElseBranch, Expr, FilesystemRule,
+    ForStmt, FunctionDecl, Identifier, IfStmt, ImportStmt, IndexExpr, InterpPart, LambdaExpr, LValue,
+    LValueStep, LetStmt,
+    LimitsBlock, LimitsEntry, Literal, LiteralExpr, MatchArm, MatchBody, MatchExpr, MemberExpr,
+    ModelDecl, ModelField, ModelProperty, NetworkRule, ObjectExpr, ObjectField, Parameter,
+    ParenExpr, ParseError, Pattern, PermissionsBlock, PermissionsEntry, Position, Program,
+    RetryBlock, RetryField, ReturnStmt, SecretValue, SecretsBlock, SecretsEntry, Span,
+    Statement as AstStatement, Style, StyleValue, SystemRule, ThemeDecl, ThemeEntry, ThemeGroup,
+    TopLevelItem, TryExpr, TypeExpr, UnaryExpr, UnaryOp, WhileStmt,
 };
 use pest::iterators::Pair;
 
@@ -29,9 +29,9 @@ pub fn build_program(pair: Pair<Rule>) -> Result<Program, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let header_pair = inner.next().ok_or_else(|| {
-        build_error(span, "missing agent header")
-    })?;
+    let header_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "missing agent header"))?;
     let header = build_agent_header(header_pair)?;
 
     let mut items = Vec::new();
@@ -39,6 +39,12 @@ pub fn build_program(pair: Pair<Rule>) -> Result<Program, ParseError> {
         match item_pair.as_rule() {
             Rule::secrets_block => {
                 items.push(TopLevelItem::Secrets(build_secrets_block(item_pair)?));
+            }
+            Rule::permissions_block => {
+                items.push(TopLevelItem::Permissions(build_permissions_block(item_pair)?));
+            }
+            Rule::limits_block => {
+                items.push(TopLevelItem::Limits(build_limits_block(item_pair)?));
             }
             Rule::model_decl => {
                 items.push(TopLevelItem::Model(build_model_decl(item_pair)?));
@@ -49,6 +55,12 @@ pub fn build_program(pair: Pair<Rule>) -> Result<Program, ParseError> {
             Rule::fn_decl => {
                 items.push(TopLevelItem::Function(build_function_decl(item_pair)?));
             }
+            Rule::component_decl => {
+                items.push(TopLevelItem::Component(build_component_decl(item_pair)?));
+            }
+            Rule::theme_decl => {
+                items.push(TopLevelItem::Theme(build_theme_decl(item_pair)?));
+            }
             Rule::ui_decl => {
                 items.push(TopLevelItem::Ui(build_ui_decl(item_pair)?));
             }
@@ -57,15 +69,19 @@ pub fn build_program(pair: Pair<Rule>) -> Result<Program, ParseError> {
         }
     }
 
-    Ok(Program { header, items, span })
+    Ok(Program {
+        header,
+        items,
+        span,
+    })
 }
 
 fn build_agent_header(pair: Pair<Rule>) -> Result<AgentHeader, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-    let name_pair = inner.next().ok_or_else(|| {
-        build_error(span, "agent header must have a name")
-    })?;
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "agent header must have a name"))?;
     let name = build_identifier(name_pair)?;
     Ok(AgentHeader { name, span })
 }
@@ -78,15 +94,18 @@ fn build_identifier(pair: Pair<Rule>) -> Result<Identifier, ParseError> {
 fn build_import_stmt(pair: Pair<Rule>) -> Result<ImportStmt, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-    let path_pair = inner.next().ok_or_else(|| {
-        build_error(span, "import needs a path")
-    })?;
+    let path_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "import needs a path"))?;
     let path = extract_string_literal(path_pair)?;
 
-    let alias = inner.next().map(|alias_pair| {
-        let id_pair = alias_pair.into_inner().next().unwrap();
-        build_identifier(id_pair)
-    }).transpose()?;
+    let alias = inner
+        .next()
+        .map(|alias_pair| {
+            let id_pair = alias_pair.into_inner().next().unwrap();
+            build_identifier(id_pair)
+        })
+        .transpose()?;
 
     Ok(ImportStmt { path, alias, span })
 }
@@ -105,13 +124,13 @@ fn build_secrets_block(pair: Pair<Rule>) -> Result<SecretsBlock, ParseError> {
 fn build_secrets_entry(pair: Pair<Rule>) -> Result<SecretsEntry, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-    let name_pair = inner.next().ok_or_else(|| {
-        build_error(span, "secrets entry needs a name")
-    })?;
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "secrets entry needs a name"))?;
     let name = build_identifier(name_pair)?;
-    let value_pair = inner.next().ok_or_else(|| {
-        build_error(span, "secrets entry needs a value")
-    })?;
+    let value_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "secrets entry needs a value"))?;
     let value = build_secret_value(value_pair)?;
     Ok(SecretsEntry { name, value, span })
 }
@@ -121,24 +140,182 @@ fn build_secret_value(pair: Pair<Rule>) -> Result<SecretValue, ParseError> {
     match pair.as_rule() {
         Rule::env_call => {
             let mut inner = pair.into_inner();
-            let arg_pair = inner.next().ok_or_else(|| {
-                build_error(span, "env() needs an argument")
-            })?;
+            let arg_pair = inner
+                .next()
+                .ok_or_else(|| build_error(span, "env() needs an argument"))?;
             Ok(SecretValue::Env(extract_string_literal(arg_pair)?))
         }
-        Rule::string_literal => {
-            Ok(SecretValue::String(extract_string_literal(pair)?))
-        }
+        Rule::string_literal => Ok(SecretValue::String(extract_string_literal(pair)?)),
         rule => Err(build_error(span, format!("invalid secret: {:?}", rule))),
     }
+}
+
+// ============================================================
+// Permissions / Limits
+// ============================================================
+
+/// Extracts an array of strings: `["a", "b"]`.
+/// A non-string element (e.g. `network: [123]`) is a parse error.
+fn build_string_array(pair: Pair<Rule>) -> Result<Vec<String>, ParseError> {
+    let mut out = Vec::new();
+    for element in pair.into_inner() {
+        match element.as_rule() {
+            Rule::string_literal => out.push(extract_string_literal(element)?),
+            rule => {
+                return Err(build_error(
+                    pair_span(&element),
+                    format!("expected a string literal, got {:?}", rule),
+                ))
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn build_permissions_block(pair: Pair<Rule>) -> Result<PermissionsBlock, ParseError> {
+    let span = pair_span(&pair);
+    let mut entries = Vec::new();
+    for entry_pair in pair.into_inner() {
+        match entry_pair.as_rule() {
+            Rule::network_rule => {
+                entries.push(PermissionsEntry::Network(build_network_rule(entry_pair)?));
+            }
+            Rule::filesystem_rule => {
+                entries.push(PermissionsEntry::Filesystem(build_filesystem_rule(entry_pair)?));
+            }
+            Rule::system_rule => {
+                entries.push(PermissionsEntry::System(build_system_rule(entry_pair)?));
+            }
+            _ => {}
+        }
+    }
+    Ok(PermissionsBlock { entries, span })
+}
+
+fn build_network_rule(pair: Pair<Rule>) -> Result<NetworkRule, ParseError> {
+    let span = pair_span(&pair);
+    let mut hosts = Vec::new();
+    for p in pair.into_inner() {
+        if p.as_rule() == Rule::array_literal {
+            hosts = build_string_array(p)?;
+        }
+    }
+    Ok(NetworkRule { hosts, span })
+}
+
+fn build_filesystem_rule(pair: Pair<Rule>) -> Result<FilesystemRule, ParseError> {
+    let span = pair_span(&pair);
+    let mut read = Vec::new();
+    let mut write = Vec::new();
+    for field in pair.into_inner() {
+        if field.as_rule() != Rule::filesystem_field {
+            continue;
+        }
+        let mut inner = field.into_inner();
+        let name = build_identifier(
+            inner
+                .next()
+                .ok_or_else(|| build_error(span, "filesystem field needs a name"))?,
+        )?;
+        let paths = inner
+            .next()
+            .ok_or_else(|| build_error(span, "filesystem field needs a value"))?;
+        match name.name.as_str() {
+            "read" => read = build_string_array(paths)?,
+            "write" => write = build_string_array(paths)?,
+            other => {
+                return Err(build_error(
+                    name.span,
+                    format!("unknown filesystem field: \"{}\" (only read and write)", other),
+                ))
+            }
+        }
+    }
+    Ok(FilesystemRule { read, write, span })
+}
+
+fn build_system_rule(pair: Pair<Rule>) -> Result<SystemRule, ParseError> {
+    let span = pair_span(&pair);
+    let mut metrics = None;
+    let mut restart = None;
+    for field in pair.into_inner() {
+        if field.as_rule() != Rule::system_field {
+            continue;
+        }
+        let mut inner = field.into_inner();
+        let name = build_identifier(
+            inner
+                .next()
+                .ok_or_else(|| build_error(span, "system field needs a name"))?,
+        )?;
+        let value_pair = inner
+            .next()
+            .ok_or_else(|| build_error(span, "system field needs a value"))?;
+        let value = build_literal(value_pair)?;
+        let value = value.as_bool().unwrap_or(false);
+        match name.name.as_str() {
+            "metrics" => metrics = Some(value),
+            "restart" => restart = Some(value),
+            other => {
+                return Err(build_error(
+                    name.span,
+                    format!("unknown system field: \"{}\" (only metrics and restart)", other),
+                ))
+            }
+        }
+    }
+    Ok(SystemRule {
+        metrics,
+        restart,
+        span,
+    })
+}
+
+fn build_limits_block(pair: Pair<Rule>) -> Result<LimitsBlock, ParseError> {
+    let span = pair_span(&pair);
+    let mut entries = Vec::new();
+    for entry_pair in pair.into_inner() {
+        if entry_pair.as_rule() != Rule::limits_entry {
+            continue;
+        }
+        let entry_span = pair_span(&entry_pair);
+        let mut inner = entry_pair.into_inner();
+        let name = build_identifier(
+            inner
+                .next()
+                .ok_or_else(|| build_error(entry_span, "limits entry needs a name"))?,
+        )?;
+        let value_pair = inner
+            .next()
+            .ok_or_else(|| build_error(entry_span, "limits entry needs a value"))?;
+        let value = build_literal(value_pair)?;
+        match name.name.as_str() {
+            "concurrency" | "timeout" => {}
+            other => {
+                return Err(build_error(
+                    name.span,
+                    format!(
+                        "unknown limits key: \"{}\" (only concurrency and timeout)",
+                        other
+                    ),
+                ))
+            }
+        }
+        entries.push(LimitsEntry {
+            name,
+            value,
+            span: entry_span,
+        });
+    }
+    Ok(LimitsBlock { entries, span })
 }
 
 fn build_model_decl(pair: Pair<Rule>) -> Result<ModelDecl, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-    let name_pair = inner.next().ok_or_else(|| {
-        build_error(span, "model needs a name")
-    })?;
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "model needs a name"))?;
     let name = build_identifier(name_pair)?;
 
     let mut fields = Vec::new();
@@ -159,13 +336,13 @@ fn build_model_decl(pair: Pair<Rule>) -> Result<ModelDecl, ParseError> {
 fn build_model_property(pair: Pair<Rule>) -> Result<ModelProperty, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-    let name_pair = inner.next().ok_or_else(|| {
-        build_error(span, "property needs a name")
-    })?;
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "property needs a name"))?;
     let name = build_identifier(name_pair)?;
-    let value_pair = inner.next().ok_or_else(|| {
-        build_error(span, "property needs a value")
-    })?;
+    let value_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "property needs a value"))?;
     let value = build_literal(value_pair)?;
     Ok(ModelProperty { name, value, span })
 }
@@ -187,10 +364,10 @@ fn build_retry_block(pair: Pair<Rule>) -> Result<RetryBlock, ParseError> {
 fn build_literal(pair: Pair<Rule>) -> Result<Literal, ParseError> {
     let span = pair_span(&pair);
     match pair.as_rule() {
-        Rule::string_literal => Ok(Literal::String(extract_string_literal(pair)?)),
+        Rule::string_literal => build_string_literal(pair),
         Rule::raw_string => {
             let s = pair.as_str();
-            Ok(Literal::RawString(s[2..s.len()-1].to_string()))
+            Ok(Literal::RawString(s[2..s.len() - 1].to_string()))
         }
         Rule::int_literal => {
             let s = pair.as_str();
@@ -198,20 +375,26 @@ fn build_literal(pair: Pair<Rule>) -> Result<Literal, ParseError> {
                 i64::from_str_radix(hex, 16)
             } else {
                 s.parse::<i64>()
-            }.map_err(|e| build_error(span, format!("invalid int: {}", e)))?;
+            }
+            .map_err(|e| build_error(span, format!("invalid int: {}", e)))?;
             Ok(Literal::Int(n))
         }
         Rule::float_literal => {
-            let n = pair.as_str().parse::<f64>()
+            let n = pair
+                .as_str()
+                .parse::<f64>()
                 .map_err(|e| build_error(span, format!("invalid float: {}", e)))?;
             Ok(Literal::Float(n))
         }
         Rule::bool_literal => Ok(Literal::Bool(pair.as_str() == "true")),
+        Rule::none_literal => Ok(Literal::None),
         Rule::duration_literal => {
             let mut inner = pair.into_inner();
             let value_pair = inner.next().unwrap();
             let unit_pair = inner.next().unwrap();
-            let value = value_pair.as_str().parse::<u64>()
+            let value = value_pair
+                .as_str()
+                .parse::<u64>()
                 .map_err(|e| build_error(span, format!("invalid duration: {}", e)))?;
             let unit = match unit_pair.as_str() {
                 "ms" => aec_ast::DurationUnit::Milliseconds,
@@ -227,12 +410,14 @@ fn build_literal(pair: Pair<Rule>) -> Result<Literal, ParseError> {
             let mut inner = pair.into_inner();
             let value_pair = inner.next().unwrap();
             let unit_pair = inner.next().unwrap();
-            let value = value_pair.as_str().parse::<u64>()
+            let value = value_pair
+                .as_str()
+                .parse::<u64>()
                 .map_err(|e| build_error(span, format!("invalid size: {}", e)))?;
             let multiplier = match unit_pair.as_str() {
                 "KB" => 1024u64,
-                "MB" => 1024*1024,
-                "GB" => 1024*1024*1024,
+                "MB" => 1024 * 1024,
+                "GB" => 1024 * 1024 * 1024,
                 other => return Err(build_error(span, format!("unknown unit: {}", other))),
             };
             Ok(Literal::ByteSize(value * multiplier))
@@ -242,8 +427,66 @@ fn build_literal(pair: Pair<Rule>) -> Result<Literal, ParseError> {
                 .map_err(|e| build_error(span, format!("invalid uuid: {}", e)))?;
             Ok(Literal::Uuid(uuid))
         }
-        rule => Err(build_error(span, format!("unsupported literal: {:?}", rule))),
+        rule => Err(build_error(
+            span,
+            format!("unsupported literal: {:?}", rule),
+        )),
     }
+}
+
+/// Builds a string literal, turning `{expr}` segments into interpolation parts.
+///
+/// A `{...}` segment is only treated as interpolation when the text between the
+/// braces parses as an expression. Anything else stays literal text, so payload
+/// strings such as `"{ \"a\": 1 }"` keep working unchanged.
+fn build_string_literal(pair: Pair<Rule>) -> Result<Literal, ParseError> {
+    let text = extract_string_literal(pair)?;
+    let parts = split_interpolation(&text);
+    if parts.iter().all(|p| matches!(p, InterpPart::Text(_))) {
+        return Ok(Literal::String(text));
+    }
+    Ok(Literal::Interpolated(parts))
+}
+
+fn split_interpolation(text: &str) -> Vec<InterpPart> {
+    let mut parts = Vec::new();
+    let mut rest = text;
+    let mut pending = String::new();
+
+    while let Some(open) = rest.find('{') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('}') else { break };
+        let candidate = &after[..close];
+
+        // Only an inner text that parses as an expression is interpolated.
+        let parsed = if candidate.trim().is_empty() {
+            None
+        } else {
+            crate::parse_expr(candidate).ok()
+        };
+
+        match parsed {
+            Some(expr) => {
+                pending.push_str(&rest[..open]);
+                if !pending.is_empty() {
+                    parts.push(InterpPart::Text(std::mem::take(&mut pending)));
+                }
+                parts.push(InterpPart::Expr(expr));
+                rest = &after[close + 1..];
+            }
+            None => {
+                // Keep the brace as literal text.
+                pending.push_str(&rest[..open + 1]);
+                rest = after;
+            }
+        }
+    }
+
+    pending.push_str(rest);
+    if !pending.is_empty() {
+        parts.push(InterpPart::Text(pending));
+    }
+    parts
 }
 
 fn extract_string_literal(pair: Pair<Rule>) -> Result<String, ParseError> {
@@ -252,7 +495,7 @@ fn extract_string_literal(pair: Pair<Rule>) -> Result<String, ParseError> {
     if !s.starts_with('"') || !s.ends_with('"') || s.len() < 2 {
         return Err(build_error(span, "invalid string literal"));
     }
-    let inner = &s[1..s.len()-1];
+    let inner = &s[1..s.len() - 1];
     let unescaped = inner
         .replace("\\n", "\n")
         .replace("\\t", "\t")
@@ -273,28 +516,35 @@ pub fn build_expr(pair: Pair<Rule>) -> Result<Expr, ParseError> {
             let inner = pair.into_inner().next().unwrap();
             build_expr(inner)
         }
-        Rule::comparison_expr => build_binary_chain(pair, &[
-            ("==", BinaryOp::Eq),
-            ("!=", BinaryOp::Neq),
-            ("<=", BinaryOp::Lte),
-            (">=", BinaryOp::Gte),
-            ("<", BinaryOp::Lt),
-            (">", BinaryOp::Gt),
-        ]),
-        Rule::additive_expr => build_binary_chain(pair, &[
-            ("+", BinaryOp::Add),
-            ("-", BinaryOp::Sub),
-        ]),
-        Rule::multiplicative_expr => build_binary_chain(pair, &[
-            ("*", BinaryOp::Mul),
-            ("/", BinaryOp::Div),
-            ("%", BinaryOp::Mod),
-        ]),
+        Rule::logical_or_expr => build_binary_chain(pair, &[("or", BinaryOp::Or)]),
+        Rule::logical_and_expr => build_binary_chain(pair, &[("and", BinaryOp::And)]),
+        Rule::comparison_expr => build_binary_chain(
+            pair,
+            &[
+                ("==", BinaryOp::Eq),
+                ("!=", BinaryOp::Neq),
+                ("<=", BinaryOp::Lte),
+                (">=", BinaryOp::Gte),
+                ("<", BinaryOp::Lt),
+                (">", BinaryOp::Gt),
+            ],
+        ),
+        Rule::additive_expr => {
+            build_binary_chain(pair, &[("+", BinaryOp::Add), ("-", BinaryOp::Sub)])
+        }
+        Rule::multiplicative_expr => build_binary_chain(
+            pair,
+            &[
+                ("*", BinaryOp::Mul),
+                ("/", BinaryOp::Div),
+                ("%", BinaryOp::Mod),
+            ],
+        ),
         Rule::unary_expr => {
             let mut inner = pair.into_inner();
-            let first = inner.next().ok_or_else(|| {
-                build_error(span, "expected expression")
-            })?;
+            let first = inner
+                .next()
+                .ok_or_else(|| build_error(span, "expected expression"))?;
 
             if first.as_rule() == Rule::unary_op {
                 let op = match first.as_str() {
@@ -302,9 +552,9 @@ pub fn build_expr(pair: Pair<Rule>) -> Result<Expr, ParseError> {
                     "not" | "!" => UnaryOp::Not,
                     other => return Err(build_error(span, format!("unknown: {}", other))),
                 };
-                let operand_pair = inner.next().ok_or_else(|| {
-                    build_error(span, "expected operand")
-                })?;
+                let operand_pair = inner
+                    .next()
+                    .ok_or_else(|| build_error(span, "expected operand"))?;
                 let operand = build_postfix(operand_pair)?;
                 Ok(Expr::Unary(Box::new(UnaryExpr { op, operand, span })))
             } else {
@@ -321,9 +571,9 @@ fn build_postfix(pair: Pair<Rule>) -> Result<Expr, ParseError> {
         Rule::postfix_expr => {
             let span = pair_span(&pair);
             let mut inner = pair.into_inner();
-            let base = inner.next().ok_or_else(|| {
-                build_error(span, "expected base expression")
-            })?;
+            let base = inner
+                .next()
+                .ok_or_else(|| build_error(span, "expected base expression"))?;
             let mut current = build_primary(base)?;
 
             for op in inner {
@@ -363,6 +613,12 @@ fn build_postfix(pair: Pair<Rule>) -> Result<Expr, ParseError> {
                             span,
                         }));
                     }
+                    Rule::try_op => {
+                        current = Expr::Try(Box::new(TryExpr {
+                            inner: current,
+                            span,
+                        }));
+                    }
                     _ => {}
                 }
             }
@@ -376,20 +632,28 @@ fn build_postfix(pair: Pair<Rule>) -> Result<Expr, ParseError> {
 fn build_argument(pair: Pair<Rule>) -> Result<Argument, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-    let first = inner.next().ok_or_else(|| {
-        build_error(span, "expected argument")
-    })?;
+    let first = inner
+        .next()
+        .ok_or_else(|| build_error(span, "expected argument"))?;
 
     if first.as_rule() == Rule::identifier {
         let name = build_identifier(first)?;
-        let value_pair = inner.next().ok_or_else(|| {
-            build_error(span, "named argument needs a value")
-        })?;
+        let value_pair = inner
+            .next()
+            .ok_or_else(|| build_error(span, "named argument needs a value"))?;
         let value = build_expr(value_pair)?;
-        Ok(Argument { name: Some(name), value, span })
+        Ok(Argument {
+            name: Some(name),
+            value,
+            span,
+        })
     } else {
         let value = build_expr(first)?;
-        Ok(Argument { name: None, value, span })
+        Ok(Argument {
+            name: None,
+            value,
+            span,
+        })
     }
 }
 
@@ -399,7 +663,10 @@ fn build_primary(pair: Pair<Rule>) -> Result<Expr, ParseError> {
         Rule::paren_expr => {
             let inner = pair.into_inner().next().unwrap();
             let inner_expr = build_expr(inner)?;
-            Ok(Expr::Paren(Box::new(ParenExpr { inner: inner_expr, span })))
+            Ok(Expr::Paren(Box::new(ParenExpr {
+                inner: inner_expr,
+                span,
+            })))
         }
         Rule::array_expr => {
             let mut elements = Vec::new();
@@ -423,47 +690,80 @@ fn build_primary(pair: Pair<Rule>) -> Result<Expr, ParseError> {
         Rule::await_expr => {
             let inner = pair.into_inner().next().unwrap();
             let inner_expr = build_expr(inner)?;
-            Ok(Expr::Await(Box::new(AwaitExpr { inner: inner_expr, span })))
+            Ok(Expr::Await(Box::new(AwaitExpr {
+                inner: inner_expr,
+                span,
+            })))
         }
         Rule::match_expr => build_match_expr(pair),
+        Rule::lambda_expr => {
+            let mut params = Vec::new();
+            let mut body = None;
+            for inner in pair.into_inner() {
+                if inner.as_rule() == Rule::lambda_params {
+                    for p in inner.into_inner() {
+                        params.push(build_identifier(p)?);
+                    }
+                } else {
+                    body = Some(build_expr(inner)?);
+                }
+            }
+            let body = body.ok_or_else(|| build_error(span, "lambda needs a body"))?;
+            Ok(Expr::Lambda(Box::new(LambdaExpr {
+                params,
+                body,
+                span,
+            })))
+        }
         Rule::identifier => {
             let id = build_identifier(pair)?;
             Ok(Expr::Identifier(id))
         }
-        Rule::string_literal | Rule::raw_string | Rule::int_literal
-        | Rule::float_literal | Rule::bool_literal | Rule::duration_literal
-        | Rule::byte_size_literal | Rule::uuid_literal => {
+        Rule::string_literal
+        | Rule::raw_string
+        | Rule::int_literal
+        | Rule::float_literal
+        | Rule::bool_literal
+        | Rule::none_literal
+        | Rule::duration_literal
+        | Rule::byte_size_literal
+        | Rule::uuid_literal => {
             let lit = build_literal(pair)?;
             Ok(Expr::Literal(Box::new(LiteralExpr { value: lit, span })))
         }
-        rule => Err(build_error(span, format!("unsupported primary: {:?}", rule))),
+        rule => Err(build_error(
+            span,
+            format!("unsupported primary: {:?}", rule),
+        )),
     }
 }
 
-fn build_binary_chain(
-    pair: Pair<Rule>,
-    ops: &[(&str, BinaryOp)],
-) -> Result<Expr, ParseError> {
+fn build_binary_chain(pair: Pair<Rule>, ops: &[(&str, BinaryOp)]) -> Result<Expr, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let first = inner.next().ok_or_else(|| {
-        build_error(span, "expected expression")
-    })?;
+    let first = inner
+        .next()
+        .ok_or_else(|| build_error(span, "expected expression"))?;
     let mut left = build_expr(first)?;
 
     let mut op_str: Option<String> = None;
     for p in inner {
         match p.as_rule() {
-            Rule::comparison_op | Rule::additive_op | Rule::multiplicative_op => {
+            Rule::comparison_op
+            | Rule::additive_op
+            | Rule::multiplicative_op
+            | Rule::or_op
+            | Rule::and_op => {
                 op_str = Some(p.as_str().to_string());
             }
             _ => {
                 let right = build_expr(p)?;
-                let op_name = op_str.take().ok_or_else(|| {
-                    build_error(span, "expected operator")
-                })?;
-                let op = ops.iter()
+                let op_name = op_str
+                    .take()
+                    .ok_or_else(|| build_error(span, "expected operator"))?;
+                let op = ops
+                    .iter()
                     .find(|(s, _)| *s == op_name)
                     .map(|(_, o)| *o)
                     .ok_or_else(|| build_error(span, format!("unknown: {}", op_name)))?;
@@ -488,9 +788,9 @@ fn build_match_expr(pair: Pair<Rule>) -> Result<Expr, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let scrut_pair = inner.next().ok_or_else(|| {
-        build_error(span, "match needs an expression")
-    })?;
+    let scrut_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "match needs an expression"))?;
     let scrutinee = build_expr(scrut_pair)?;
 
     let mut arms = Vec::new();
@@ -511,20 +811,24 @@ fn build_match_arm(pair: Pair<Rule>) -> Result<MatchArm, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let pat_pair = inner.next().ok_or_else(|| {
-        build_error(span, "match arm needs a pattern")
-    })?;
+    let pat_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "match arm needs a pattern"))?;
     let pattern = build_pattern(pat_pair)?;
 
-    let body_pair = inner.next().ok_or_else(|| {
-        build_error(span, "match arm needs a body")
-    })?;
+    let body_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "match arm needs a body"))?;
     let body = match body_pair.as_rule() {
         Rule::block => MatchBody::Block(build_block(body_pair)?),
         _ => MatchBody::Expr(build_expr(body_pair)?),
     };
 
-    Ok(MatchArm { pattern, body, span })
+    Ok(MatchArm {
+        pattern,
+        body,
+        span,
+    })
 }
 
 fn build_pattern(pair: Pair<Rule>) -> Result<Pattern, ParseError> {
@@ -545,12 +849,19 @@ fn build_pattern(pair: Pair<Rule>) -> Result<Pattern, ParseError> {
             let id = build_identifier(pair)?;
             Ok(Pattern::Identifier(id))
         }
-        Rule::string_literal | Rule::int_literal | Rule::bool_literal
-        | Rule::float_literal | Rule::raw_string => {
+        Rule::string_literal
+        | Rule::int_literal
+        | Rule::bool_literal
+        | Rule::float_literal
+        | Rule::none_literal
+        | Rule::raw_string => {
             let lit = build_literal(pair)?;
             Ok(Pattern::Literal(lit))
         }
-        rule => Err(build_error(span, format!("unsupported pattern: {:?}", rule))),
+        rule => Err(build_error(
+            span,
+            format!("unsupported pattern: {:?}", rule),
+        )),
     }
 }
 
@@ -562,9 +873,9 @@ fn build_function_decl(pair: Pair<Rule>) -> Result<FunctionDecl, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let name_pair = inner.next().ok_or_else(|| {
-        build_error(span, "fn needs a name")
-    })?;
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "fn needs a name"))?;
     let name = build_identifier(name_pair)?;
 
     let mut params = Vec::new();
@@ -605,15 +916,25 @@ fn build_parameter(pair: Pair<Rule>) -> Result<Parameter, ParseError> {
     let mut inner = pair.into_inner();
     let name = build_identifier(inner.next().unwrap())?;
     let ty_pair = inner.next().unwrap();
-    let ty = build_base_type(ty_pair)?;
+    let ty = build_full_type(ty_pair)?;
     let default = inner.next().map(build_expr).transpose()?;
-    Ok(Parameter { name, ty, default, span })
+    Ok(Parameter {
+        name,
+        ty,
+        default,
+        span,
+    })
 }
 
 fn build_full_type(pair: Pair<Rule>) -> Result<TypeExpr, ParseError> {
     let mut inner = pair.into_inner();
     let base = inner.next().unwrap();
-    build_base_type(base)
+    let ty = build_base_type(base)?;
+    // A trailing `optional_marker` makes the type optional: `int?` → Optional(int)
+    if inner.next().is_some() {
+        return Ok(TypeExpr::Optional(Box::new(ty)));
+    }
+    Ok(ty)
 }
 
 fn build_base_type(pair: Pair<Rule>) -> Result<TypeExpr, ParseError> {
@@ -629,6 +950,7 @@ fn build_base_type(pair: Pair<Rule>) -> Result<TypeExpr, ParseError> {
                 "unit" => TypeExpr::Unit,
                 "uuid" => TypeExpr::Uuid,
                 "timestamp" => TypeExpr::Timestamp,
+                "function" => TypeExpr::Function,
                 other => return Err(build_error(span, format!("unknown type: {}", other))),
             };
             Ok(ty)
@@ -641,6 +963,12 @@ fn build_base_type(pair: Pair<Rule>) -> Result<TypeExpr, ParseError> {
             let inner = pair.into_inner().next().unwrap();
             let inner_ty = build_base_type(inner)?;
             Ok(TypeExpr::Array(Box::new(inner_ty)))
+        }
+        Rule::result_type => {
+            let mut inner = pair.into_inner();
+            let ok_ty = build_base_type(inner.next().unwrap())?;
+            let err_ty = build_base_type(inner.next().unwrap())?;
+            Ok(TypeExpr::Result(Box::new(ok_ty), Box::new(err_ty)))
         }
         Rule::base_type => {
             let inner = pair.into_inner().next().unwrap();
@@ -665,28 +993,8 @@ fn build_statement(pair: Pair<Rule>) -> Result<AstStatement, ParseError> {
         Rule::if_stmt => Ok(AstStatement::If(build_if_stmt(pair)?)),
         Rule::while_stmt => Ok(AstStatement::While(build_while_stmt(pair)?)),
         Rule::for_stmt => Ok(AstStatement::For(build_for_stmt(pair)?)),
-        Rule::let_stmt => {
-            let mut inner = pair.into_inner();
-            let name = build_identifier(inner.next().unwrap())?;
-
-            let mut ty = None;
-            let mut next = inner.next().ok_or_else(|| {
-                build_error(span, "let needs a value")
-            })?;
-
-            if matches!(next.as_rule(),
-                Rule::base_type | Rule::primitive_type
-                | Rule::named_type | Rule::array_type
-            ) {
-                ty = Some(build_base_type(next)?);
-                next = inner.next().ok_or_else(|| {
-                    build_error(span, "let needs a value")
-                })?;
-            }
-
-            let value = build_expr(next)?;
-            Ok(AstStatement::Let(LetStmt { name, ty, value, span }))
-        }
+        Rule::let_stmt => build_let_stmt(pair, false),
+        Rule::var_stmt => build_let_stmt(pair, true),
         Rule::assign_stmt => Ok(AstStatement::Assign(build_assign_stmt(pair)?)),
         Rule::return_stmt => {
             let mut inner = pair.into_inner();
@@ -698,22 +1006,55 @@ fn build_statement(pair: Pair<Rule>) -> Result<AstStatement, ParseError> {
             let expr = build_expr(inner)?;
             Ok(AstStatement::Expr(expr))
         }
-        rule => Err(build_error(span, format!("unsupported statement: {:?}", rule))),
+        rule => Err(build_error(
+            span,
+            format!("unsupported statement: {:?}", rule),
+        )),
     }
+}
+
+fn build_let_stmt(pair: Pair<Rule>, mutable: bool) -> Result<AstStatement, ParseError> {
+    let span = pair_span(&pair);
+    let keyword = if mutable { "var" } else { "let" };
+
+    let mut inner = pair.into_inner();
+    let name = build_identifier(inner.next().unwrap())?;
+
+    let mut ty = None;
+    let mut next = inner
+        .next()
+        .ok_or_else(|| build_error(span, format!("{} needs a value", keyword)))?;
+
+    // `let x: <full_type> = <expr>` — the type also carries an optional `?`.
+    if next.as_rule() == Rule::full_type {
+        ty = Some(build_full_type(next)?);
+        next = inner
+            .next()
+            .ok_or_else(|| build_error(span, format!("{} needs a value", keyword)))?;
+    }
+
+    let value = build_expr(next)?;
+    Ok(AstStatement::Let(LetStmt {
+        name,
+        ty,
+        value,
+        mutable,
+        span,
+    }))
 }
 
 fn build_assign_stmt(pair: Pair<Rule>) -> Result<AssignStmt, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let lv_pair = inner.next().ok_or_else(|| {
-        build_error(span, "assign needs a target")
-    })?;
+    let lv_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "assign needs a target"))?;
     let target = build_lvalue(lv_pair)?;
 
-    let op_pair = inner.next().ok_or_else(|| {
-        build_error(span, "assign needs an operator")
-    })?;
+    let op_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "assign needs an operator"))?;
     let op = match op_pair.as_str() {
         "=" => AssignOp::Assign,
         "+=" => AssignOp::AddAssign,
@@ -723,12 +1064,17 @@ fn build_assign_stmt(pair: Pair<Rule>) -> Result<AssignStmt, ParseError> {
         other => return Err(build_error(span, format!("unknown op: {}", other))),
     };
 
-    let value_pair = inner.next().ok_or_else(|| {
-        build_error(span, "assign needs a value")
-    })?;
+    let value_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "assign needs a value"))?;
     let value = build_expr(value_pair)?;
 
-    Ok(AssignStmt { target, op, value, span })
+    Ok(AssignStmt {
+        target,
+        op,
+        value,
+        span,
+    })
 }
 
 fn build_lvalue(pair: Pair<Rule>) -> Result<LValue, ParseError> {
@@ -759,14 +1105,14 @@ fn build_if_stmt(pair: Pair<Rule>) -> Result<IfStmt, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let cond_pair = inner.next().ok_or_else(|| {
-        build_error(span, "if needs a condition")
-    })?;
+    let cond_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "if needs a condition"))?;
     let condition = build_expr(cond_pair)?;
 
-    let then_pair = inner.next().ok_or_else(|| {
-        build_error(span, "if needs a then block")
-    })?;
+    let then_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "if needs a then block"))?;
     let then_block = build_block(then_pair)?;
 
     let else_branch = inner
@@ -783,9 +1129,10 @@ fn build_if_stmt(pair: Pair<Rule>) -> Result<IfStmt, ParseError> {
 }
 
 fn build_else_branch(pair: Pair<Rule>) -> Result<ElseBranch, ParseError> {
-    let inner = pair.into_inner().next().ok_or_else(|| {
-        build_error(Span::dummy(), "empty else clause")
-    })?;
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| build_error(Span::dummy(), "empty else clause"))?;
     match inner.as_rule() {
         Rule::if_stmt => {
             let stmt = build_if_stmt(inner)?;
@@ -803,39 +1150,48 @@ fn build_while_stmt(pair: Pair<Rule>) -> Result<WhileStmt, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let cond_pair = inner.next().ok_or_else(|| {
-        build_error(span, "while needs a condition")
-    })?;
+    let cond_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "while needs a condition"))?;
     let condition = build_expr(cond_pair)?;
 
-    let body_pair = inner.next().ok_or_else(|| {
-        build_error(span, "while needs a body")
-    })?;
+    let body_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "while needs a body"))?;
     let body = build_block(body_pair)?;
 
-    Ok(WhileStmt { condition, body, span })
+    Ok(WhileStmt {
+        condition,
+        body,
+        span,
+    })
 }
 
 fn build_for_stmt(pair: Pair<Rule>) -> Result<ForStmt, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let var_pair = inner.next().ok_or_else(|| {
-        build_error(span, "for needs a variable")
-    })?;
+    let var_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "for needs a variable"))?;
     let variable = build_identifier(var_pair)?;
 
-    let iter_pair = inner.next().ok_or_else(|| {
-        build_error(span, "for needs an iterable")
-    })?;
+    let iter_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "for needs an iterable"))?;
     let iterable = build_expr(iter_pair)?;
 
-    let body_pair = inner.next().ok_or_else(|| {
-        build_error(span, "for needs a body")
-    })?;
+    let body_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "for needs a body"))?;
     let body = build_block(body_pair)?;
 
-    Ok(ForStmt { variable, iterable, body, span })
+    Ok(ForStmt {
+        variable,
+        iterable,
+        body,
+        span,
+    })
 }
 
 // ============================================================
@@ -843,39 +1199,188 @@ fn build_for_stmt(pair: Pair<Rule>) -> Result<ForStmt, ParseError> {
 // ============================================================
 
 use aec_ast::{
-    UiDecl, ScreenExpr, UiStatement, StateDeclUi, ElementExpr, ElementModifier,
-    ElementProperty, Binding, EventHandler, UiIf, UiFor, TypeRef,
+    Binding, ElementExpr, ElementModifier, ElementProperty, EventHandler, ScreenExpr, StateDeclUi,
+    TypeRef, UiDecl, UiFor, UiIf, UiStatement,
 };
 
 pub fn build_ui_decl(pair: Pair<Rule>) -> Result<UiDecl, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let name_pair = inner.next().ok_or_else(|| {
-        build_error(span, "ui needs a name")
-    })?;
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "ui needs a name"))?;
     let name = build_identifier(name_pair)?;
 
-    let screen_pair = inner.next().ok_or_else(|| {
-        build_error(span, "ui needs a Screen")
-    })?;
+    let screen_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "ui needs a Screen"))?;
     let screen = build_screen(screen_pair)?;
 
     Ok(UiDecl { name, screen, span })
+}
+
+fn build_component_decl(pair: Pair<Rule>) -> Result<ComponentDecl, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "component needs a name"))?;
+    let name = build_identifier(name_pair)?;
+
+    let mut props = Vec::new();
+    let mut render = None;
+    for p in inner {
+        match p.as_rule() {
+            Rule::component_prop => props.push(build_component_prop(p)?),
+            Rule::component_render => render = Some(build_ui_block(p)?),
+            _ => {}
+        }
+    }
+
+    Ok(ComponentDecl {
+        name,
+        props,
+        render,
+        span,
+    })
+}
+
+fn build_component_prop(pair: Pair<Rule>) -> Result<ComponentProp, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "component prop needs a name"))?;
+    let name = build_identifier(name_pair)?;
+    let ty = inner.next().map(build_type_ref).transpose()?;
+
+    Ok(ComponentProp { name, ty, span })
+}
+
+fn build_component_use(pair: Pair<Rule>) -> Result<ComponentUse, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "component use needs a name"))?;
+    let name = build_identifier(name_pair)?;
+
+    let mut props = Vec::new();
+    for p in inner {
+        if p.as_rule() == Rule::component_arg {
+            let mut arg = p.into_inner();
+            let name_pair = arg
+                .next()
+                .ok_or_else(|| build_error(span, "component argument needs a name"))?;
+            let prop_name = build_identifier(name_pair)?;
+            let value_pair = arg
+                .next()
+                .ok_or_else(|| build_error(span, "component argument needs a value"))?;
+            let value = build_expr(value_pair)?;
+            props.push(ElementProperty {
+                name: prop_name,
+                value,
+                span,
+            });
+        }
+    }
+
+    Ok(ComponentUse { name, props, span })
+}
+
+fn build_theme_decl(pair: Pair<Rule>) -> Result<ThemeDecl, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "theme needs a name"))?;
+    let name = build_identifier(name_pair)?;
+
+    let mut is_default = false;
+    let mut extends = None;
+    let mut groups = Vec::new();
+
+    for p in inner {
+        match p.as_rule() {
+            Rule::theme_default => is_default = true,
+            Rule::theme_extends => {
+                let id_pair = p
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| build_error(span, "extends needs a theme name"))?;
+                extends = Some(build_identifier(id_pair)?);
+            }
+            Rule::theme_group => groups.push(build_theme_group(p)?),
+            _ => {}
+        }
+    }
+
+    Ok(ThemeDecl {
+        name,
+        is_default,
+        extends,
+        groups,
+        span,
+    })
+}
+
+fn build_theme_group(pair: Pair<Rule>) -> Result<ThemeGroup, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "theme group needs a name"))?;
+    let name = build_identifier(name_pair)?;
+
+    let mut entries = Vec::new();
+    for p in inner {
+        if p.as_rule() == Rule::theme_entry {
+            entries.push(build_theme_entry(p)?);
+        }
+    }
+
+    Ok(ThemeGroup {
+        name,
+        entries,
+        span,
+    })
+}
+
+fn build_theme_entry(pair: Pair<Rule>) -> Result<ThemeEntry, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "theme entry needs a name"))?;
+    let name = build_identifier(name_pair)?;
+
+    let value_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "theme entry needs a value"))?;
+    let value = build_style_value(value_pair)?;
+
+    Ok(ThemeEntry { name, value, span })
 }
 
 fn build_screen(pair: Pair<Rule>) -> Result<ScreenExpr, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let title_pair = inner.next().ok_or_else(|| {
-        build_error(span, "Screen needs a title")
-    })?;
+    let title_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "Screen needs a title"))?;
     let title = extract_string_literal(title_pair)?;
 
-    let block_pair = inner.next().ok_or_else(|| {
-        build_error(span, "Screen needs a body")
-    })?;
+    let block_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "Screen needs a body"))?;
     let body = build_ui_block(block_pair)?;
 
     Ok(ScreenExpr { title, body, span })
@@ -899,6 +1404,7 @@ fn build_ui_statement(pair: Pair<Rule>) -> Result<Option<UiStatement>, ParseErro
         Rule::element_expr => Ok(Some(UiStatement::Element(build_element_expr(pair)?))),
         Rule::ui_if => Ok(Some(UiStatement::If(build_ui_if(pair)?))),
         Rule::ui_for => Ok(Some(UiStatement::For(build_ui_for(pair)?))),
+        Rule::component_use => Ok(Some(UiStatement::Component(build_component_use(pair)?))),
         _ => Ok(None),
     }
 }
@@ -907,9 +1413,9 @@ fn build_display_expr(pair: Pair<Rule>) -> Result<ElementExpr, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let id_pair = inner.next().ok_or_else(|| {
-        build_error(span, "Display needs an identifier")
-    })?;
+    let id_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "Display needs an identifier"))?;
     let id = build_identifier(id_pair)?;
 
     let name = Identifier::new("Display", span);
@@ -928,9 +1434,9 @@ fn build_messages_expr(pair: Pair<Rule>) -> Result<ElementExpr, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let id_pair = inner.next().ok_or_else(|| {
-        build_error(span, "Messages needs an identifier")
-    })?;
+    let id_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "Messages needs an identifier"))?;
     let id = build_identifier(id_pair)?;
 
     let name = Identifier::new("Messages", span);
@@ -953,22 +1459,22 @@ fn build_state_decl_ui(pair: Pair<Rule>) -> Result<StateDeclUi, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let name_pair = inner.next().ok_or_else(|| {
-        build_error(span, "state needs a name")
-    })?;
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "state needs a name"))?;
     let name = build_identifier(name_pair)?;
 
     let mut ty = None;
-    let mut value_pair = None;
+    let value_pair;
 
-    // بررسی: آیا type داریم یا مستقیم expr؟
-    let next = inner.next().ok_or_else(|| {
-        build_error(span, "state needs a value")
-    })?;
+    // Check: is there an explicit type, or does the expr start right away?
+    let next = inner
+        .next()
+        .ok_or_else(|| build_error(span, "state needs a value"))?;
 
-    if matches!(next.as_rule(),
-        Rule::base_type | Rule::primitive_type
-        | Rule::named_type | Rule::array_type
+    if matches!(
+        next.as_rule(),
+        Rule::base_type | Rule::primitive_type | Rule::named_type | Rule::array_type
     ) {
         ty = Some(build_type_ref(next)?);
         value_pair = inner.next();
@@ -976,26 +1482,30 @@ fn build_state_decl_ui(pair: Pair<Rule>) -> Result<StateDeclUi, ParseError> {
         value_pair = Some(next);
     }
 
-    let value_pair = value_pair.ok_or_else(|| {
-        build_error(span, "state needs a value")
-    })?;
+    let value_pair = value_pair.ok_or_else(|| build_error(span, "state needs a value"))?;
 
-    // بررسی: آیا state_value است یا expr؟
+    // Check: is this a state_value or a plain expr?
     let initial = if value_pair.as_rule() == Rule::state_value {
         // state_value = _{ array_literal | object_expr | expr }
-        // silent rule — inner رو بگیر
-        let inner_pair = value_pair.into_inner().next().ok_or_else(|| {
-            build_error(span, "empty state value")
-        })?;
+        // silent rule — pull its inner pair
+        let inner_pair = value_pair
+            .into_inner()
+            .next()
+            .ok_or_else(|| build_error(span, "empty state value"))?;
         build_expr_any(inner_pair)?
     } else {
         build_expr_any(value_pair)?
     };
 
-    Ok(StateDeclUi { name, ty, initial, span })
+    Ok(StateDeclUi {
+        name,
+        ty,
+        initial,
+        span,
+    })
 }
 
-/// build_expr_any — برای expr یا array_literal یا object_expr
+/// build_expr_any — accepts expr, array_literal, or object_expr
 fn build_expr_any(pair: Pair<Rule>) -> Result<Expr, ParseError> {
     match pair.as_rule() {
         Rule::array_literal => {
@@ -1030,9 +1540,10 @@ fn build_expr_any(pair: Pair<Rule>) -> Result<Expr, ParseError> {
             })))
         }
         Rule::expr | Rule::state_value => {
-            let inner = pair.into_inner().next().ok_or_else(|| {
-                build_error(Span::dummy(), "empty expr")
-            })?;
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| build_error(Span::dummy(), "empty expr"))?;
             build_expr_any(inner)
         }
         _ => build_expr(pair),
@@ -1056,6 +1567,20 @@ fn build_type_ref(pair: Pair<Rule>) -> Result<TypeRef, ParseError> {
             let id = build_identifier(pair.into_inner().next().unwrap())?;
             Ok(TypeRef::Named(id.name))
         }
+        Rule::component_type => {
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| build_error(span, "component prop type is empty"))?;
+            build_type_ref(inner)
+        }
+        Rule::array_type => {
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| build_error(span, "array type is empty"))?;
+            Ok(TypeRef::Array(Box::new(build_type_ref(inner)?)))
+        }
         Rule::base_type => {
             let inner = pair.into_inner().next().unwrap();
             build_type_ref(inner)
@@ -1068,9 +1593,9 @@ fn build_element_expr(pair: Pair<Rule>) -> Result<ElementExpr, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let name_pair = inner.next().ok_or_else(|| {
-        build_error(span, "element needs a name")
-    })?;
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "element needs a name"))?;
     let name = build_identifier(name_pair)?;
 
     let mut primary_arg = None;
@@ -1082,16 +1607,18 @@ fn build_element_expr(pair: Pair<Rule>) -> Result<ElementExpr, ParseError> {
         match p.as_rule() {
             Rule::string_literal => {
                 let lit = build_literal(p)?;
-                primary_arg = Some(Expr::Literal(Box::new(
-                    aec_ast::LiteralExpr { value: lit, span }
-                )));
+                primary_arg = Some(Expr::Literal(Box::new(aec_ast::LiteralExpr {
+                    value: lit,
+                    span,
+                })));
             }
             Rule::int_literal | Rule::float_literal | Rule::bool_literal => {
                 if primary_arg.is_none() {
                     let lit = build_literal(p)?;
-                    primary_arg = Some(Expr::Literal(Box::new(
-                        aec_ast::LiteralExpr { value: lit, span }
-                    )));
+                    primary_arg = Some(Expr::Literal(Box::new(aec_ast::LiteralExpr {
+                        value: lit,
+                        span,
+                    })));
                 }
             }
             Rule::identifier => {
@@ -1138,9 +1665,9 @@ fn build_style_block(pair: Pair<Rule>) -> Result<Style, ParseError> {
             let name_pair = inner.next().unwrap();
             let name = name_pair.as_str().to_string();
 
-            let value_pair = inner.next().ok_or_else(|| {
-                build_error(Span::dummy(), "style property needs a value")
-            })?;
+            let value_pair = inner
+                .next()
+                .ok_or_else(|| build_error(Span::dummy(), "style property needs a value"))?;
 
             let value = build_style_value(value_pair)?;
             style.properties.insert(name, value);
@@ -1154,7 +1681,7 @@ fn build_style_value(pair: Pair<Rule>) -> Result<StyleValue, ParseError> {
     match pair.as_rule() {
         Rule::style_string => {
             let s = pair.as_str();
-            let inner = &s[1..s.len()-1];
+            let inner = &s[1..s.len() - 1];
             Ok(StyleValue::String(inner.to_string()))
         }
         Rule::style_number => {
@@ -1169,17 +1696,19 @@ fn build_style_value(pair: Pair<Rule>) -> Result<StyleValue, ParseError> {
                     .map_err(|e| build_error(pair_span(&pair), format!("invalid int: {}", e)))
             }
         }
-        Rule::style_bool => {
-            Ok(StyleValue::Bool(pair.as_str() == "true"))
-        }
-        Rule::identifier => {
-            Ok(StyleValue::Ident(pair.as_str().to_string()))
-        }
+        Rule::style_bool => Ok(StyleValue::Bool(pair.as_str() == "true")),
+        Rule::identifier => Ok(StyleValue::Ident(pair.as_str().to_string())),
+        // A design token such as theme.color.primary is kept as a raw path and
+        // replaced with the real theme value later by the UI builder.
+        Rule::design_token => Ok(StyleValue::Ident(pair.as_str().to_string())),
         Rule::style_value => {
             let inner = pair.into_inner().next().unwrap();
             build_style_value(inner)
         }
-        rule => Err(build_error(pair_span(&pair), format!("unsupported style value: {:?}", rule))),
+        rule => Err(build_error(
+            pair_span(&pair),
+            format!("unsupported style value: {:?}", rule),
+        )),
     }
 }
 
@@ -1190,9 +1719,9 @@ fn build_element_property(pair: Pair<Rule>) -> Result<ElementProperty, ParseErro
     let name_pair = inner.next().unwrap();
     let name = build_identifier(name_pair)?;
 
-    let value_pair = inner.next().ok_or_else(|| {
-        build_error(span, "property needs a value")
-    })?;
+    let value_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "property needs a value"))?;
     let value = build_expr(value_pair)?;
 
     Ok(ElementProperty { name, value, span })
@@ -1202,19 +1731,19 @@ fn build_binding(pair: Pair<Rule>) -> Result<Binding, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    // فرمت: bind value to message
-    // value = نام property
-    // message = نام state variable
+    // Format: bind value to message
+    // value = the property name
+    // message = the state variable name
 
     let property_pair = inner.next().unwrap();
     let property_name = build_identifier(property_pair)?;
 
-    let state_pair = inner.next().ok_or_else(|| {
-        build_error(span, "binding needs a state variable")
-    })?;
+    let state_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "binding needs a state variable"))?;
     let state_name = build_identifier(state_pair)?;
 
-    // target = state (message)، source = property (value)
+    // target = state (message), source = property (value)
     Ok(Binding {
         target: state_name,
         source: Expr::Identifier(property_name),
@@ -1229,12 +1758,12 @@ fn build_event_handler(pair: Pair<Rule>) -> Result<EventHandler, ParseError> {
     let event_pair = inner.next().unwrap();
     let event = build_identifier(event_pair)?;
 
-    let handler_pair = inner.next().ok_or_else(|| {
-        build_error(span, "event needs a handler")
-    })?;
+    let handler_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "event needs a handler"))?;
     let handler = build_expr_from_identifier(handler_pair)?;
 
-    // بقیه‌ی member_op و call_op ها
+    // Any remaining member_op and call_op steps
     let mut expr = handler;
     for op in inner {
         match op.as_rule() {
@@ -1267,11 +1796,15 @@ fn build_event_handler(pair: Pair<Rule>) -> Result<EventHandler, ParseError> {
         }
     }
 
-    Ok(EventHandler { event, handler: expr, span })
+    Ok(EventHandler {
+        event,
+        handler: expr,
+        span,
+    })
 }
 
 fn build_expr_from_identifier(pair: Pair<Rule>) -> Result<Expr, ParseError> {
-    // فقط identifier ساده
+    // Only a plain identifier
     if pair.as_rule() == Rule::identifier {
         let id = build_identifier(pair)?;
         return Ok(Expr::Identifier(id));
@@ -1283,14 +1816,14 @@ fn build_ui_if(pair: Pair<Rule>) -> Result<UiIf, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let cond_pair = inner.next().ok_or_else(|| {
-        build_error(span, "if needs a condition")
-    })?;
+    let cond_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "if needs a condition"))?;
     let condition = build_expr(cond_pair)?;
 
-    let then_pair = inner.next().ok_or_else(|| {
-        build_error(span, "if needs a body")
-    })?;
+    let then_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "if needs a body"))?;
     let then_body = build_ui_block(then_pair)?;
 
     let else_body = inner.next().map(|p| build_ui_block(p)).transpose()?;
@@ -1307,19 +1840,19 @@ fn build_ui_for(pair: Pair<Rule>) -> Result<UiFor, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
 
-    let var_pair = inner.next().ok_or_else(|| {
-        build_error(span, "for needs a variable")
-    })?;
+    let var_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "for needs a variable"))?;
     let variable = build_identifier(var_pair)?;
 
-    let iter_pair = inner.next().ok_or_else(|| {
-        build_error(span, "for needs an iterable")
-    })?;
+    let iter_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "for needs an iterable"))?;
     let iterable = build_expr(iter_pair)?;
 
-    let body_pair = inner.next().ok_or_else(|| {
-        build_error(span, "for needs a body")
-    })?;
+    let body_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "for needs a body"))?;
     let body = build_ui_block(body_pair)?;
 
     Ok(UiFor {

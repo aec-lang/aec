@@ -8,7 +8,12 @@ use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
 
-pub fn call_extended(name: &str, args: &[Value], span: Span) -> Result<Option<Value>, RuntimeError> {
+pub fn call_extended(
+    name: &str,
+    args: &[Value],
+    span: Span,
+    limits: &crate::permissions::Limits,
+) -> Result<Option<Value>, RuntimeError> {
     let result = match name {
         // ============================================================
         // SHELL
@@ -350,7 +355,7 @@ pub fn call_extended(name: &str, args: &[Value], span: Span) -> Result<Option<Va
                 }),
             };
             let client = reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
+                .timeout(limits.http_timeout())
                 .build()
                 .map_err(|e| RuntimeError::Generic {
                     message: format!("client error: {}", e),
@@ -386,7 +391,7 @@ pub fn call_extended(name: &str, args: &[Value], span: Span) -> Result<Option<Va
                 }),
             };
             let client = reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
+                .timeout(limits.http_timeout())
                 .build()
                 .map_err(|e| RuntimeError::Generic {
                     message: format!("client error: {}", e),

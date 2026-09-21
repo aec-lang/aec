@@ -1,0 +1,52 @@
+# Sandbox / Permissions
+#
+# Run:
+#   aec run examples/sandbox.aec --cli --entry main
+#
+# This example shows the ALLOWED path. To see a DENIAL, uncomment the marked
+# line below -- you get a clear `permission denied` message and exit code 1.
+#
+# Note: no `permissions` block means "no restrictions" (backward compatible).
+# Having one means "closed by default": every undeclared key is denied.
+
+agent SandboxDemo
+
+permissions {
+    network: ["api.example.com"]
+
+    filesystem {
+        read:  ["."]
+        write: ["."]
+    }
+
+    system {
+        metrics: true
+        restart: false
+    }
+}
+
+limits {
+    concurrency: 4
+    timeout: 5s
+}
+
+fn main() -> int {
+    let path = "sandbox-demo.txt"
+
+    # ALLOWED -- writing and reading inside the declared root
+    file.write(path, "hello from inside the sandbox")
+    let back = file.read(path)
+    print("written and read back:", back)
+
+    # ALLOWED -- because `system { metrics: true }` is declared
+    let info = sys.info()
+    print("sys.info allowed:", info)
+
+    # DENIED -- this host is not in the allowlist:
+    #   permission denied: network denied: host "evil.example" is not in the allowlist ...
+    # let stolen = http.get("https://evil.example/steal")
+
+    file.delete(path)
+    print("temporary file removed.")
+    return 0
+}

@@ -16,3 +16,7 @@ regex = "1.10"
 md5 = "0.7"
 sha2 = "0.10"
 base64 = "0.22"
+rusqlite.workspace = true
+
+[dev-dependencies]
+aec-parser = { path = "../aec-parser" }

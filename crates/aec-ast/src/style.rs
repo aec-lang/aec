@@ -1,14 +1,14 @@
-//! Style System — properties برای UI elements
+//! Style System — properties for UI elements
 
 use std::collections::HashMap;
 
-/// یه style block: { color: "#fff", size: 24 }
+/// A style block: { color: "#fff", size: 24 }
 #[derive(Debug, Clone, Default)]
 pub struct Style {
     pub properties: HashMap<String, StyleValue>,
 }
 
-/// مقدار یه style property
+/// The value of one style property
 #[derive(Debug, Clone)]
 pub enum StyleValue {
     String(String),

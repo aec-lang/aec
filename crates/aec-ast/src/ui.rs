@@ -1,5 +1,5 @@
 //! UI DSL — AST nodes for UI definitions
-//! این بخشی از **زبان** AEC ـه، نه یه کتابخونه
+//! This is part of the AEC **language**, not a library
 
 use crate::expr::Expr;
 use crate::program::Identifier;
@@ -22,7 +22,7 @@ pub struct ScreenExpr {
     pub span: Span,
 }
 
-/// یه statement داخل UI
+/// A single statement inside the UI body
 #[derive(Debug, Clone)]
 pub enum UiStatement {
     /// @message: string = ""
@@ -38,6 +38,34 @@ pub enum UiStatement {
 
     /// for item in items { ... }
     For(UiFor),
+
+    /// component Name { ... }
+    Component(ComponentUse),
+}
+
+/// component Name { prop x: Type render { ... } }
+#[derive(Debug, Clone)]
+pub struct ComponentDecl {
+    pub name: Identifier,
+    pub props: Vec<ComponentProp>,
+    pub render: Option<Vec<UiStatement>>,
+    pub span: Span,
+}
+
+/// prop x: Type
+#[derive(Debug, Clone)]
+pub struct ComponentProp {
+    pub name: Identifier,
+    pub ty: Option<TypeRef>,
+    pub span: Span,
+}
+
+/// Name x: value
+#[derive(Debug, Clone)]
+pub struct ComponentUse {
+    pub name: Identifier,
+    pub props: Vec<ElementProperty>,
+    pub span: Span,
 }
 
 /// @message: string = ""
@@ -81,15 +109,15 @@ pub struct ElementProperty {
 
 #[derive(Debug, Clone)]
 pub struct Binding {
-    pub target: Identifier,      // value
-    pub source: Expr,            // message
+    pub target: Identifier, // value
+    pub source: Expr,       // message
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct EventHandler {
-    pub event: Identifier,       // click
-    pub handler: Expr,           // do_this()
+    pub event: Identifier, // click
+    pub handler: Expr,     // do_this()
     pub span: Span,
 }
 
@@ -111,12 +139,13 @@ pub struct UiFor {
     pub span: Span,
 }
 
-/// نوع ساده برای UI state
+/// A simple type for UI state
 #[derive(Debug, Clone)]
 pub enum TypeRef {
     String,
     Int,
     Float,
     Bool,
+    Array(Box<TypeRef>),
     Named(String),
 }

@@ -1,0 +1,35 @@
+# Result + the `?` operator
+#
+# Run:
+#   aec run examples/result.aec --cli --entry main
+#
+# `ok(v)` builds a success and `err(e)` a failure. `expr?` unwraps a success and
+# otherwise returns the error from the enclosing function, so failures bubble up
+# without any manual checks.
+
+agent ResultDemo
+
+fn parse_port(text: string) -> Result(int, string) {
+    let n = int(text)
+    if n <= 0 {
+        return err("port must be positive, got {n}")
+    }
+    return ok(n)
+}
+
+fn describe(text: string) -> Result(string, string) {
+    # `?` returns early with err(...) when parse_port fails
+    let port = parse_port(text)?
+    return ok("listening on port {port}")
+}
+
+fn main() -> int {
+    let good = describe("8080")
+    print("good:", good)
+
+    let bad = describe("-1")
+    print("bad is_err:", is_err(bad))
+    print("bad:", bad)
+
+    return 0
+}

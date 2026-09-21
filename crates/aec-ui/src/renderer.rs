@@ -1,8 +1,10 @@
 //! Native renderer — egui-based
 
-use aec_ast::{Program, UiDecl, Span};
+use crate::widgets::{
+    build_widgets_with_themes, ComponentRegistry, Themes, UiState, UiValue, Widget, WidgetStyle,
+};
+use aec_ast::{Program, Span, TopLevelItem, UiDecl};
 use aec_runtime::{Interpreter, Value};
-use crate::widgets::{build_widgets, Widget, WidgetStyle, UiState, UiValue};
 use eframe::egui;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -11,6 +13,8 @@ pub struct AecApp {
     pub program: Program,
     pub interpreter: Arc<Mutex<Interpreter>>,
     pub ui_decl: UiDecl,
+    pub components: ComponentRegistry,
+    pub themes: Themes,
     pub widgets: Vec<Widget>,
     pub state: UiState,
     pub state_var_names: HashSet<String>,
@@ -22,8 +26,21 @@ impl AecApp {
         let mut interpreter = Interpreter::new();
         interpreter.run(&program).map_err(|e| e.to_string())?;
 
+        let components: ComponentRegistry = program
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                TopLevelItem::Component(component) => {
+                    Some((component.name.name.clone(), component.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+
+        let themes = Themes::from_items(&program.items);
+
         let mut state = UiState::new();
-        let widgets = build_widgets(&ui.screen.body, &mut state);
+        let widgets = build_widgets_with_themes(&ui.screen.body, &mut state, &components, &themes);
         let state_var_names: HashSet<String> = state.values.keys().cloned().collect();
 
         sync_state_to_interpreter(&state, &mut interpreter, &state_var_names);
@@ -32,6 +49,8 @@ impl AecApp {
             program: program.clone(),
             interpreter: Arc::new(Mutex::new(interpreter)),
             ui_decl: ui.clone(),
+            components,
+            themes,
             widgets,
             state,
             state_var_names,
@@ -40,18 +59,23 @@ impl AecApp {
     }
 
     fn load_fonts(&mut self, ctx: &egui::Context) {
-        if self.fonts_loaded { return; }
+        if self.fonts_loaded {
+            return;
+        }
         let mut fonts = egui::FontDefinitions::default();
         fonts.font_data.insert(
             "Vazirmatn".to_owned(),
-            egui::FontData::from_static(include_bytes!(
-                "../assets/fonts/Vazirmatn-Regular.ttf"
-            )).into(),
+            egui::FontData::from_static(include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf"))
+                .into(),
         );
-        fonts.families.entry(egui::FontFamily::Proportional)
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
             .or_default()
             .insert(0, "Vazirmatn".to_owned());
-        fonts.families.entry(egui::FontFamily::Monospace)
+        fonts
+            .families
+            .entry(egui::FontFamily::Monospace)
             .or_default()
             .push("Vazirmatn".to_owned());
         ctx.set_fonts(fonts);
@@ -76,11 +100,20 @@ impl AecApp {
             sync_state_from_interpreter(&mut self.state, &interp, &self.state_var_names);
         }
         let mut rebuild_state = self.state.clone();
-        self.widgets = build_widgets(&self.ui_decl.screen.body, &mut rebuild_state);
+        self.widgets = build_widgets_with_themes(
+            &self.ui_decl.screen.body,
+            &mut rebuild_state,
+            &self.components,
+            &self.themes,
+        );
     }
 }
 
-fn sync_state_to_interpreter(state: &UiState, interp: &mut Interpreter, var_names: &HashSet<String>) {
+fn sync_state_to_interpreter(
+    state: &UiState,
+    interp: &mut Interpreter,
+    var_names: &HashSet<String>,
+) {
     let mut env = interp.global.borrow_mut();
     for name in var_names {
         if let Some(v) = state.values.get(name) {
@@ -89,11 +122,17 @@ fn sync_state_to_interpreter(state: &UiState, interp: &mut Interpreter, var_name
     }
 }
 
-fn sync_state_from_interpreter(state: &mut UiState, interp: &Interpreter, var_names: &HashSet<String>) {
+fn sync_state_from_interpreter(
+    state: &mut UiState,
+    interp: &Interpreter,
+    var_names: &HashSet<String>,
+) {
     let env = interp.global.borrow();
     for name in var_names {
         if let Some(value) = env.get(name) {
-            state.values.insert(name.clone(), aec_value_to_ui_value(&value));
+            state
+                .values
+                .insert(name.clone(), aec_value_to_ui_value(&value));
         }
     }
 }
@@ -107,7 +146,9 @@ fn ui_value_to_aec_value(v: &UiValue) -> Value {
         UiValue::Array(arr) => Value::Array(arr.iter().map(ui_value_to_aec_value).collect()),
         UiValue::Object(obj) => {
             let mut map = std::collections::HashMap::new();
-            for (k, v) in obj { map.insert(k.clone(), ui_value_to_aec_value(v)); }
+            for (k, v) in obj {
+                map.insert(k.clone(), ui_value_to_aec_value(v));
+            }
             Value::Object(map)
         }
     }
@@ -122,9 +163,14 @@ fn aec_value_to_ui_value(v: &Value) -> UiValue {
         Value::Array(arr) => UiValue::Array(arr.iter().map(aec_value_to_ui_value).collect()),
         Value::Object(obj) => {
             let mut map = std::collections::HashMap::new();
-            for (k, v) in obj { map.insert(k.clone(), aec_value_to_ui_value(v)); }
+            for (k, v) in obj {
+                map.insert(k.clone(), aec_value_to_ui_value(v));
+            }
             UiValue::Object(map)
         }
+        // A result has no UI counterpart; show it the way the runtime prints it.
+        Value::Result(Ok(v)) => UiValue::String(format!("ok({})", v)),
+        Value::Result(Err(e)) => UiValue::String(format!("err({})", e)),
         _ => UiValue::String(String::new()),
     }
 }
@@ -141,16 +187,37 @@ fn is_rtl(text: &str) -> bool {
     })
 }
 
+fn style_value_color(value: &aec_ast::StyleValue) -> Option<egui::Color32> {
+    match value {
+        aec_ast::StyleValue::String(s) => parse_color(s),
+        aec_ast::StyleValue::Ident(s) => parse_color(s),
+        _ => None,
+    }
+}
+
 fn make_text(text: &str, style: &WidgetStyle) -> egui::RichText {
     let _ = is_rtl(text);
     let mut rt = egui::RichText::new(text);
-    if let Some(color_str) = style.get_string("color").or_else(|| style.get_string("text_color")) {
-        if let Some(color) = parse_color(&color_str) { rt = rt.color(color); }
+    if let Some(color_str) = style
+        .get_string("color")
+        .or_else(|| style.get_string("text_color"))
+    {
+        if let Some(color) = parse_color(&color_str) {
+            rt = rt.color(color);
+        }
     }
-    if let Some(size_str) = style.get_string("size").or_else(|| style.get_string("font_size")) {
-        if let Ok(size) = size_str.parse::<f32>() { rt = rt.size(size); }
+    if let Some(size_str) = style
+        .get_string("size")
+        .or_else(|| style.get_string("font_size"))
+    {
+        if let Ok(size) = size_str.parse::<f32>() {
+            rt = rt.size(size);
+        }
     }
-    if let Some(weight) = style.get_string("weight").or_else(|| style.get_string("font_weight")) {
+    if let Some(weight) = style
+        .get_string("weight")
+        .or_else(|| style.get_string("font_weight"))
+    {
         match weight.as_str() {
             "bold" | "700" => rt = rt.strong(),
             "italic" => rt = rt.italics(),
@@ -191,7 +258,18 @@ impl eframe::App for AecApp {
         self.load_fonts(ctx);
         let mut pending = Vec::new();
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        // Default background taken from the active theme
+        let background = self
+            .themes
+            .active()
+            .and_then(|t| t.get("color.background"))
+            .and_then(style_value_color);
+
+        let mut panel = egui::CentralPanel::default();
+        if let Some(color) = background {
+            panel = panel.frame(egui::Frame::default().fill(color));
+        }
+        panel.show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.heading(&self.ui_decl.screen.title);
                 ui.add_space(16.0);
@@ -206,18 +284,30 @@ impl eframe::App for AecApp {
     }
 }
 
-fn render_widgets(ui: &mut egui::Ui, widgets: &[Widget], state: &mut UiState, pending: &mut Vec<String>) {
+fn render_widgets(
+    ui: &mut egui::Ui,
+    widgets: &[Widget],
+    state: &mut UiState,
+    pending: &mut Vec<String>,
+) {
     for widget in widgets {
         render_widget(ui, widget, state, pending);
     }
 }
 
-fn render_widget(ui: &mut egui::Ui, widget: &Widget, state: &mut UiState, pending: &mut Vec<String>) {
+fn render_widget(
+    ui: &mut egui::Ui,
+    widget: &Widget,
+    state: &mut UiState,
+    pending: &mut Vec<String>,
+) {
     match widget {
         Widget::Column(children, style) => {
             let mut frame = egui::Frame::default();
             if let Some(bg) = style.get_string("background") {
-                if let Some(c) = parse_color(&bg) { frame = frame.fill(c); }
+                if let Some(c) = parse_color(&bg) {
+                    frame = frame.fill(c);
+                }
             }
             frame.show(ui, |ui| {
                 ui.vertical(|ui| {
@@ -229,7 +319,9 @@ fn render_widget(ui: &mut egui::Ui, widget: &Widget, state: &mut UiState, pendin
         Widget::Row(children, style) => {
             let mut frame = egui::Frame::default();
             if let Some(bg) = style.get_string("background") {
-                if let Some(c) = parse_color(&bg) { frame = frame.fill(c); }
+                if let Some(c) = parse_color(&bg) {
+                    frame = frame.fill(c);
+                }
             }
             frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -241,7 +333,9 @@ fn render_widget(ui: &mut egui::Ui, widget: &Widget, state: &mut UiState, pendin
         Widget::Card(children, style) => {
             let mut frame = egui::Frame::group(ui.style());
             if let Some(bg) = style.get_string("background") {
-                if let Some(c) = parse_color(&bg) { frame = frame.fill(c); }
+                if let Some(c) = parse_color(&bg) {
+                    frame = frame.fill(c);
+                }
             }
             frame.show(ui, |ui| {
                 render_widgets(ui, children, state, pending);
@@ -266,7 +360,12 @@ fn render_widget(ui: &mut egui::Ui, widget: &Widget, state: &mut UiState, pendin
             }
         }
 
-        Widget::Input { bind_target, placeholder, value, style } => {
+        Widget::Input {
+            bind_target,
+            placeholder,
+            value,
+            style,
+        } => {
             let _ = style;
             if let Some(target) = bind_target {
                 let mut val = state.get_string(target);
@@ -283,20 +382,27 @@ fn render_widget(ui: &mut egui::Ui, widget: &Widget, state: &mut UiState, pendin
             }
         }
 
-        Widget::Button { label, on_click, style } => {
-            let bg = style.get_string("background")
+        Widget::Button {
+            label,
+            on_click,
+            style,
+        } => {
+            let bg = style
+                .get_string("background")
                 .or_else(|| style.get_string("background_color"))
                 .and_then(|s| parse_color(&s));
 
-            let text_color = style.get_string("color")
+            let text_color = style
+                .get_string("color")
                 .or_else(|| style.get_string("text_color"))
                 .and_then(|s| parse_color(&s));
 
-            let padding = style.get_string("padding")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(8.0);
+            let padding = style
+                .get_string("padding")
+                .and_then(|s| s.parse::<f32>().ok());
 
-            let radius = style.get_string("radius")
+            let radius = style
+                .get_string("radius")
                 .or_else(|| style.get_string("border_radius"))
                 .and_then(|s| s.parse::<f32>().ok())
                 .unwrap_or(6.0);
@@ -321,7 +427,17 @@ fn render_widget(ui: &mut egui::Ui, widget: &Widget, state: &mut UiState, pendin
                 button
             };
 
-            let response = ui.add(button);
+            let response = if let Some(padding) = padding {
+                // egui has no per-button padding on `Button` itself, so scope the
+                // setting over this one widget.
+                ui.scope(|ui| {
+                    ui.spacing_mut().button_padding = egui::vec2(padding, padding * 0.5);
+                    ui.add(button)
+                })
+                .inner
+            } else {
+                ui.add(button)
+            };
 
             if response.clicked() {
                 if let Some(fn_name) = on_click {
@@ -331,19 +447,19 @@ fn render_widget(ui: &mut egui::Ui, widget: &Widget, state: &mut UiState, pendin
         }
 
         Widget::MessagesList { source, style: _ } => {
-            // items رو زنده از state بگیر
-            let items: Vec<(String, String)> = state.get_value(source)
+            // Pull the items live from state
+            let items: Vec<(String, String)> = state
+                .get_value(source)
                 .map(|v| v.as_array())
                 .unwrap_or_default()
                 .into_iter()
                 .filter_map(|item| {
                     if let UiValue::Object(o) = item {
-                        let role = o.get("role")
+                        let role = o
+                            .get("role")
                             .map(|v| v.as_string())
                             .unwrap_or_else(|| "user".to_string());
-                        let content = o.get("content")
-                            .map(|v| v.as_string())
-                            .unwrap_or_default();
+                        let content = o.get("content").map(|v| v.as_string()).unwrap_or_default();
                         Some((role, content))
                     } else {
                         None
@@ -356,7 +472,7 @@ fn render_widget(ui: &mut egui::Ui, widget: &Widget, state: &mut UiState, pendin
             }
 
             egui::ScrollArea::vertical()
-                .id_source(format!("messages_{}", source))
+                .id_salt(format!("messages_{}", source))
                 .max_height(400.0)
                 .show(ui, |ui| {
                     for (role, content) in items {
@@ -375,7 +491,11 @@ fn render_widget(ui: &mut egui::Ui, widget: &Widget, state: &mut UiState, pendin
                 });
         }
 
-        Widget::If { condition, then_branch, else_branch } => {
+        Widget::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             if *condition {
                 render_widgets(ui, then_branch, state, pending);
             } else if let Some(else_b) = else_branch {
@@ -387,17 +507,22 @@ fn render_widget(ui: &mut egui::Ui, widget: &Widget, state: &mut UiState, pendin
             render_widgets(ui, items, state, pending);
         }
 
-        Widget::Divider => { ui.separator(); }
-        Widget::Heading(text, style) => { ui.heading(make_text(text, style)); }
-        Widget::Spacer => { ui.add_space(8.0); }
+        Widget::Divider => {
+            ui.separator();
+        }
+        Widget::Heading(text, style) => {
+            ui.heading(make_text(text, style));
+        }
+        Widget::Spacer => {
+            ui.add_space(8.0);
+        }
     }
 }
 
 pub fn run_ui(program: &Program, ui: &UiDecl) -> Result<(), eframe::Error> {
-    let app = AecApp::new(program.clone(), ui.clone())
-        .map_err(|e| eframe::Error::AppCreation(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other, e
-        ))))?;
+    let app = AecApp::new(program.clone(), ui.clone()).map_err(|e| {
+        eframe::Error::AppCreation(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))
+    })?;
 
     let title = ui.screen.title.clone();
     let options = eframe::NativeOptions {

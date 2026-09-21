@@ -1,0 +1,33 @@
+# Persistent Memory (SQLite)
+#
+# Shows that conversation memory survives across runs.
+#
+# Run:
+#   aec run examples/memory.aec --cli --entry main
+#
+# Run it twice: the message count grows and the previous history is printed too.
+# The database file is created next to the working directory.
+
+agent MemoryDemo
+
+fn main() -> int {
+    let db = "aec-memory-demo.sqlite"
+    let conv = "demo"
+
+    # Connect to persistent memory (the file is created if missing)
+    memory.open(db)
+
+    let before = memory.count(conv)
+    print("messages before:", before)
+
+    # Append one exchange
+    memory.add(conv, "user", "Hello, my name is Reza")
+    memory.add(conv, "assistant", "Hi Reza! How can I help?")
+
+    print("count after appending:", memory.count(conv))
+
+    # Read the full history, including messages from earlier runs
+    print("history:", memory.get(conv))
+
+    return 0
+}

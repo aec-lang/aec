@@ -4,7 +4,7 @@ use crate::expr::Expr;
 use crate::program::Identifier;
 use crate::span::Span;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDecl {
     pub name: Identifier,
     pub params: Vec<Parameter>,
@@ -13,7 +13,7 @@ pub struct FunctionDecl {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
     pub name: Identifier,
     pub ty: TypeExpr,
@@ -21,13 +21,13 @@ pub struct Parameter {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     pub statements: Vec<Statement>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Let(LetStmt),
     Assign(AssignStmt),
@@ -38,15 +38,17 @@ pub enum Statement {
     For(ForStmt),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LetStmt {
     pub name: Identifier,
     pub ty: Option<TypeExpr>,
     pub value: Expr,
+    /// `true` for `var` (reassignable), `false` for `let` (immutable).
+    pub mutable: bool,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AssignStmt {
     pub target: LValue,
     pub op: AssignOp,
@@ -54,14 +56,14 @@ pub struct AssignStmt {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LValue {
     pub base: Identifier,
     pub path: Vec<LValueStep>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LValueStep {
     Member(Identifier),
     Index(Expr),
@@ -76,13 +78,13 @@ pub enum AssignOp {
     DivAssign,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReturnStmt {
     pub value: Option<Expr>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt {
     pub condition: Expr,
     pub then_block: Block,
@@ -90,20 +92,20 @@ pub struct IfStmt {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ElseBranch {
     ElseIf(Box<IfStmt>),
     Else(Block),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WhileStmt {
     pub condition: Expr,
     pub body: Block,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ForStmt {
     pub variable: Identifier,
     pub iterable: Expr,
@@ -111,7 +113,7 @@ pub struct ForStmt {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeExpr {
     String,
     Int,
@@ -121,7 +123,11 @@ pub enum TypeExpr {
     Unit,
     Uuid,
     Timestamp,
+    /// Any function value — a top-level `fn` or a lambda.
+    Function,
     Named(Identifier),
     Optional(Box<TypeExpr>),
     Array(Box<TypeExpr>),
+    /// `Result(ok_type, err_type)`
+    Result(Box<TypeExpr>, Box<TypeExpr>),
 }

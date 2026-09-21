@@ -1,0 +1,66 @@
+# examples/theme.aec
+# Theme System — declaring a global theme and using its tokens in elements and components
+
+agent ThemeDemo
+
+theme Dark default {
+    color {
+        background: "#1e1e2e"
+        surface: "#313244"
+        text: "#cdd6f4"
+        muted: "#a6adc8"
+        primary: "#89b4fa"
+    }
+    text {
+        size: 16
+        weight: "normal"
+    }
+    spacing {
+        sm: 4
+        md: 8
+        lg: 16
+    }
+    shape {
+        radius: 8
+    }
+}
+
+# A second theme that extends Dark and only overrides its colors
+theme Ocean extends Dark {
+    color {
+        background: "#0b132b"
+        surface: "#1c2541"
+        primary: "#00b4d8"
+    }
+}
+
+component MessageBubble {
+    prop role: string
+    prop content: string
+
+    render {
+        Card {
+            Text role { color: theme.color.primary weight: "bold" }
+            Text content
+        }
+    }
+}
+
+ui Main = Screen "Theme Demo" {
+    @draft: string = ""
+
+    Column background: theme.color.background {
+        Text "🎨 Theme System" size: 24 weight: "bold"
+        Text "توکن‌های تم سراسری، قابل استفاده در همهٔ عناصر" color: theme.color.muted
+
+        Card {
+            MessageBubble role: "user" content: "سلام!"
+            MessageBubble role: "ai" content: "سلام! چطور میتونم کمک کنم؟"
+        }
+
+        Row {
+            Input placeholder: "پیام..." bind value to draft
+            Button "بفرست" background: theme.color.primary
+        }
+    }
+}

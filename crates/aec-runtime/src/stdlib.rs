@@ -1,4 +1,4 @@
-//! Standard Library — توابع داخلی AEC
+//! Standard Library — AEC built-in functions
 
 use crate::errors::RuntimeError;
 use crate::value::Value;
@@ -7,8 +7,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
-/// اجرای یه built-in
-pub fn call_builtin(name: &str, args: &[Value], span: Span) -> Result<Option<Value>, RuntimeError> {
+/// Run a built-in
+pub fn call_builtin(
+    name: &str,
+    args: &[Value],
+    span: Span,
+    limits: &crate::permissions::Limits,
+) -> Result<Option<Value>, RuntimeError> {
     let result: Value = match name {
         // ---------- File I/O ----------
         "file.read" | "file_read" => {
@@ -173,7 +178,7 @@ pub fn call_builtin(name: &str, args: &[Value], span: Span) -> Result<Option<Val
                 }),
             };
             let client = reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(30))
+                .timeout(limits.http_timeout())
                 .build()
                 .map_err(|e| RuntimeError::Generic {
                     message: format!("failed to build client: {}", e),
@@ -213,7 +218,7 @@ pub fn call_builtin(name: &str, args: &[Value], span: Span) -> Result<Option<Val
                 }),
             };
             let client = reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(30))
+                .timeout(limits.http_timeout())
                 .build()
                 .map_err(|e| RuntimeError::Generic {
                     message: format!("failed to build client: {}", e),
@@ -325,7 +330,7 @@ pub fn call_builtin(name: &str, args: &[Value], span: Span) -> Result<Option<Val
     Ok(Some(result))
 }
 
-/// تبدیل serde_json::Value به Value
+/// Convert serde_json::Value to Value
 fn json_to_value(json: &serde_json::Value) -> Result<Value, RuntimeError> {
     Ok(match json {
         serde_json::Value::Null => Value::None,
@@ -357,7 +362,7 @@ fn json_to_value(json: &serde_json::Value) -> Result<Value, RuntimeError> {
     })
 }
 
-/// تبدیل Value به serde_json::Value
+/// Convert Value to serde_json::Value
 fn value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::None => serde_json::Value::Null,
@@ -377,7 +382,9 @@ fn value_to_json(value: &Value) -> serde_json::Value {
             }
             serde_json::Value::Object(map)
         }
-        Value::Function(_) => serde_json::Value::Null,
+        Value::Function(_) | Value::Closure(_) => serde_json::Value::Null,
+        // A result is not JSON-serializable; render it as its display text.
+        Value::Result(_) => serde_json::Value::String(value.to_string()),
     }
 }
 

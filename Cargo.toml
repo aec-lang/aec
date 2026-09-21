@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/aec-ast",
     "crates/aec-parser",
+    "crates/aec-check",
     "crates/aec-runtime",
     "crates/aec-cli",
     "crates/aec-ui",
@@ -27,5 +28,6 @@ regex = "1.10"
 md5 = "0.7"
 sha2 = "0.10"
 base64 = "0.22"
+rusqlite = { version = "0.40", features = ["bundled"] }
 egui = "0.29"
 eframe = "0.29"

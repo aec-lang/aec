@@ -1,9 +1,10 @@
-//! Interpreter — اجرای AST
+//! Interpreter — executing the AST
 
 use crate::errors::RuntimeError;
 use crate::llm;
 use crate::memory::Memory;
-use crate::value::{Env, Environment, Function, Value};
+use crate::permissions::{Limits, Permissions};
+use crate::value::{Closure, Env, Environment, Function, Value};
 use aec_ast::{
     AssignOp, BinaryOp, Block, ElseBranch, Expr, ForStmt, FunctionDecl,
     IfStmt, LValue, LValueStep, MatchBody, Pattern, Program, Statement, UnaryOp,
@@ -15,6 +16,9 @@ use std::rc::Rc;
 pub struct Interpreter {
     pub global: Env,
     pub memory: Memory,
+    /// Permission policy. `None` = the program has no `permissions` block → no gate is applied.
+    pub permissions: Option<Permissions>,
+    pub limits: Limits,
 }
 
 impl Interpreter {
@@ -23,13 +27,22 @@ impl Interpreter {
         Self {
             global,
             memory: Memory::new(),
+            permissions: None,
+            limits: Limits::default(),
         }
     }
 
     pub fn run(&mut self, program: &Program) -> Result<(), RuntimeError> {
         for item in &program.items {
-            if let aec_ast::TopLevelItem::Function(f) = item {
-                self.register_function(f);
+            match item {
+                aec_ast::TopLevelItem::Function(f) => self.register_function(f),
+                aec_ast::TopLevelItem::Permissions(block) => {
+                    self.permissions = Some(Permissions::from_block(block));
+                }
+                aec_ast::TopLevelItem::Limits(block) => {
+                    self.limits = Limits::from_block(block);
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -90,9 +103,12 @@ impl Interpreter {
             local_env.borrow_mut().set(param.clone(), arg);
         }
 
-        match self.exec_block(&func.body, local_env)? {
-            Flow::Normal(v) => Ok(v),
-            Flow::Return(v) => Ok(v),
+        match self.exec_block(&func.body, local_env) {
+            Ok(Flow::Normal(v)) | Ok(Flow::Return(v)) => Ok(v),
+            // `?` met an `err(...)`: the function returns that error (wrapped back
+            // into a result) to its caller.
+            Err(RuntimeError::EarlyReturn { value }) => Ok(Value::Result(Err(value))),
+            Err(e) => Err(e),
         }
     }
 
@@ -102,18 +118,44 @@ impl Interpreter {
         args: &[Value],
         span: aec_ast::Span,
     ) -> Result<Option<Value>, RuntimeError> {
-        // اول stdlib رو چک کن
-        if let Some(v) = crate::stdlib::call_builtin(name, args, span)? {
+        // Permission gate: if the program declared a `permissions` block, every builtin
+        // is checked against the allowlist before it runs. Unknown names (user
+        // functions) pass through untouched.
+        if let Some(perms) = &self.permissions {
+            perms
+                .check_builtin(name, args)
+                .map_err(|message| crate::permissions::denied(message, span))?;
+        }
+
+        // check stdlib first
+        if let Some(v) = crate::stdlib::call_builtin(name, args, span, &self.limits)? {
             return Ok(Some(v));
         }
         if let Some(v) = crate::stdlib::call_builtin2(name, args, span)? {
             return Ok(Some(v));
         }
-        if let Some(v) = crate::stdlib_extended::call_extended(name, args, span)? {
+        if let Some(v) = crate::stdlib_extended::call_extended(name, args, span, &self.limits)? {
             return Ok(Some(v));
         }
-        // بعد built-in های داخلی
+        // then the internal built-ins
         let result = match name {
+            // Result constructors and predicates (see the `?` operator).
+            "ok" => {
+                require_args(args, 1, span)?;
+                Value::ok(args[0].clone())
+            }
+            "err" => {
+                require_args(args, 1, span)?;
+                Value::err(args[0].clone())
+            }
+            "is_ok" => {
+                require_args(args, 1, span)?;
+                Value::Bool(matches!(args[0], Value::Result(Ok(_))))
+            }
+            "is_err" => {
+                require_args(args, 1, span)?;
+                Value::Bool(matches!(args[0], Value::Result(Err(_))))
+            }
             "print" => {
                 let s = args.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(" ");
                 println!("{}", s);
@@ -403,6 +445,20 @@ impl Interpreter {
                     }
                 }
             }
+            "memory.open" | "memory_open" => {
+                if args.len() != 1 {
+                    return Err(RuntimeError::WrongArgCount { expected: 1, got: args.len(), span });
+                }
+                let path = match &args[0] {
+                    Value::String(s) => s.clone(),
+                    v => return Err(RuntimeError::TypeError {
+                        message: format!("memory.open path needs string, got {}", v.type_name()),
+                        span,
+                    }),
+                };
+                self.memory = Memory::open(&path).map_err(|e| e.with_span(span))?;
+                Value::None
+            }
             "memory.add" | "memory_add" => {
                 if args.len() < 3 {
                     return Err(RuntimeError::WrongArgCount {
@@ -432,7 +488,9 @@ impl Interpreter {
                         span,
                     }),
                 };
-                self.memory.add(&conv_id, &role, &content);
+                self.memory
+                    .add(&conv_id, &role, &content)
+                    .map_err(|e| e.with_span(span))?;
                 Value::None
             }
             "memory.get" | "memory_get" => {
@@ -446,7 +504,7 @@ impl Interpreter {
                         span,
                     }),
                 };
-                self.memory.to_value(&conv_id)
+                self.memory.to_value(&conv_id).map_err(|e| e.with_span(span))?
             }
             "memory.clear" | "memory_clear" => {
                 if args.len() != 1 {
@@ -459,7 +517,9 @@ impl Interpreter {
                         span,
                     }),
                 };
-                self.memory.clear(&conv_id);
+                self.memory
+                    .clear(&conv_id)
+                    .map_err(|e| e.with_span(span))?;
                 Value::None
             }
             "memory.count" | "memory_count" => {
@@ -473,11 +533,71 @@ impl Interpreter {
                         span,
                     }),
                 };
-                Value::Int(self.memory.len(&conv_id) as i64)
+                Value::Int(self.memory.len(&conv_id).map_err(|e| e.with_span(span))? as i64)
             }
             _ => return Ok(None),
         };
         Ok(Some(result))
+    }
+
+    /// Calls a lambda value with the given arguments.
+    fn call_closure(
+        &mut self,
+        closure: Rc<Closure>,
+        args: Vec<Value>,
+        span: aec_ast::Span,
+    ) -> Result<Value, RuntimeError> {
+        if args.len() != closure.params.len() {
+            return Err(RuntimeError::WrongArgCount {
+                expected: closure.params.len(),
+                got: args.len(),
+                span,
+            });
+        }
+
+        let local_env = Environment::with_parent(closure.env.clone());
+        for (param, arg) in closure.params.iter().zip(args) {
+            local_env.borrow_mut().set(param.clone(), arg);
+        }
+
+        // A lambda body is one expression, so there is no `Flow` to unwind.
+        // A `?` inside it returns the error *from the lambda*.
+        match self.eval_expr(&closure.body, local_env) {
+            Ok(value) => Ok(value),
+            Err(RuntimeError::EarlyReturn { value }) => Ok(Value::Result(Err(value))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Snapshot of the visible local bindings — a lambda's by-move capture.
+    ///
+    /// Globals are deliberately left out and reached through the parent link, so
+    /// a lambda can still call top-level functions and recursion keeps working.
+    fn capture_env(&self, env: &Env) -> Env {
+        let captured = Environment::new();
+        let mut bindings: Vec<(String, Value)> = Vec::new();
+        let mut current = Some(env.clone());
+
+        while let Some(scope) = current {
+            if Rc::ptr_eq(&scope, &self.global) {
+                break;
+            }
+            let borrowed = scope.borrow();
+            for (name, value) in &borrowed.vars {
+                // The innermost binding of a name wins.
+                if !bindings.iter().any(|(existing, _)| existing == name) {
+                    bindings.push((name.clone(), value.clone()));
+                }
+            }
+            current = borrowed.parent.clone();
+        }
+
+        {
+            let mut scope = captured.borrow_mut();
+            scope.vars.extend(bindings);
+            scope.parent = Some(self.global.clone());
+        }
+        captured
     }
 
     fn exec_block(&mut self, block: &Block, env: Env) -> Result<Flow, RuntimeError> {
@@ -684,7 +804,7 @@ impl Interpreter {
 
     pub fn eval_expr(&mut self, expr: &Expr, env: Env) -> Result<Value, RuntimeError> {
         match expr {
-            Expr::Literal(lit) => self.eval_literal(&lit.value, lit.span),
+            Expr::Literal(lit) => self.eval_literal(&lit.value, lit.span, env.clone()),
             Expr::Identifier(id) => env
                 .borrow()
                 .get(&id.name)
@@ -728,6 +848,20 @@ impl Interpreter {
                 }
             }
             Expr::Call(call) => {
+                let mut args = Vec::new();
+                for arg in &call.args {
+                    args.push(self.eval_expr(&arg.value, env.clone())?);
+                }
+
+                // A name bound to a lambda is called through its value. Everything
+                // else (builtins, global `fn`s, namespaces) resolves by name.
+                if let Expr::Identifier(id) = &call.callee {
+                    let callee = env.borrow().get(&id.name);
+                    if let Some(Value::Closure(closure)) = callee {
+                        return self.call_closure(closure, args, call.span);
+                    }
+                }
+
                 let callee_name = match &call.callee {
                     Expr::Identifier(id) => id.name.clone(),
                     Expr::Member(m) => match &m.object {
@@ -746,10 +880,6 @@ impl Interpreter {
                         })
                     }
                 };
-                let mut args = Vec::new();
-                for arg in &call.args {
-                    args.push(self.eval_expr(&arg.value, env.clone())?);
-                }
                 self.call_function(&callee_name, args, call.span)
             }
             Expr::Member(m) => {
@@ -807,6 +937,24 @@ impl Interpreter {
                 }
             }
             Expr::Await(a) => self.eval_expr(&a.inner, env),
+            Expr::Lambda(l) => Ok(Value::Closure(Rc::new(Closure {
+                params: l.params.iter().map(|p| p.name.clone()).collect(),
+                body: l.body.clone(),
+                env: self.capture_env(&env),
+            }))),
+            Expr::Try(t) => match self.eval_expr(&t.inner, env)? {
+                // `ok(v)?` evaluates to `v`
+                Value::Result(Ok(value)) => Ok(*value),
+                // `err(e)?` unwinds the enclosing function with `err(e)`
+                Value::Result(Err(error)) => Err(RuntimeError::EarlyReturn { value: error }),
+                other => Err(RuntimeError::TypeError {
+                    message: format!(
+                        "can't use '?' on {} — expected a result from ok(...)/err(...)",
+                        other.type_name()
+                    ),
+                    span: t.span,
+                }),
+            },
             Expr::Match(m) => self.eval_match(m, env),
         }
     }
@@ -863,14 +1011,31 @@ impl Interpreter {
         &mut self,
         lit: &aec_ast::Literal,
         _span: aec_ast::Span,
+        env: Env,
     ) -> Result<Value, RuntimeError> {
         Ok(match lit {
             aec_ast::Literal::Int(n) => Value::Int(*n),
             aec_ast::Literal::Float(f) => Value::Float(*f),
             aec_ast::Literal::String(s) => Value::String(s.clone()),
+            aec_ast::Literal::RawString(s) => Value::String(s.clone()),
             aec_ast::Literal::Bool(b) => Value::Bool(*b),
             aec_ast::Literal::None => Value::None,
-            _ => Value::None,
+            aec_ast::Literal::Uuid(u) => Value::String(u.to_string()),
+            aec_ast::Literal::ByteSize(bytes) => Value::Int(*bytes as i64),
+            aec_ast::Literal::Duration(d) => Value::Int((d.value * d.unit.to_ms()) as i64),
+            aec_ast::Literal::Interpolated(parts) => {
+                let mut out = String::new();
+                for part in parts {
+                    match part {
+                        aec_ast::InterpPart::Text(text) => out.push_str(text),
+                        aec_ast::InterpPart::Expr(expr) => {
+                            let value = self.eval_expr(expr, env.clone())?;
+                            out.push_str(&interp_text(value));
+                        }
+                    }
+                }
+                Value::String(out)
+            }
         })
     }
 
@@ -967,6 +1132,32 @@ fn cmp_op(
         }
     };
     Ok(Value::Bool(op(a, b)))
+}
+
+/// Guards a builtin against the wrong number of arguments.
+fn require_args(args: &[Value], expected: usize, span: aec_ast::Span) -> Result<(), RuntimeError> {
+    if args.len() == expected {
+        return Ok(());
+    }
+    Err(RuntimeError::WrongArgCount {
+        expected,
+        got: args.len(),
+        span,
+    })
+}
+
+/// Text of a value inside a string interpolation.
+///
+/// An object carrying a `text` field (a model response) is unpacked to that
+/// field, so `"{reply}"` prints the answer instead of a debug dump.
+fn interp_text(value: Value) -> String {
+    match &value {
+        Value::Object(fields) => match fields.get("text") {
+            Some(text) => interp_text(text.clone()),
+            None => value.to_string(),
+        },
+        _ => value.to_string(),
+    }
 }
 
 fn values_equal(a: &Value, b: &Value) -> bool {

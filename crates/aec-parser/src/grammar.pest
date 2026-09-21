@@ -2,7 +2,11 @@ program = { SOI ~ NEWLINE* ~ agent_header ~ top_level_item* ~ EOI }
 
 agent_header = { "agent" ~ identifier ~ NEWLINE }
 
-top_level_item = _{ secrets_block | model_decl | import_stmt | fn_decl | ui_decl }
+// Root rule used only by `parse_expr` — needed to parse the inside of a
+// string interpolation (`"{a + 1}"`) back into an expression.
+expr_root = { SOI ~ NEWLINE* ~ expr ~ NEWLINE* ~ EOI }
+
+top_level_item = _{ secrets_block | permissions_block | limits_block | model_decl | import_stmt | fn_decl | component_decl | theme_decl | ui_decl }
 
 import_stmt = { "import" ~ string_literal ~ alias? ~ NEWLINE }
 alias       = { "as" ~ identifier }
@@ -12,6 +16,22 @@ secrets_entry = { identifier ~ ":" ~ secret_value ~ NEWLINE }
 
 secret_value = _{ env_call | string_literal }
 env_call     = { "env" ~ "(" ~ string_literal ~ ")" }
+
+// ---------- Permissions / Limits ----------
+// A permissions block means "closed by default"; without it nothing is enforced.
+permissions_block = { "permissions" ~ "{" ~ NEWLINE* ~ permissions_entry* ~ "}" ~ NEWLINE* }
+permissions_entry = _{ network_rule | filesystem_rule | system_rule }
+
+network_rule = { "network" ~ ":" ~ array_literal ~ NEWLINE* }
+
+filesystem_rule  = { "filesystem" ~ "{" ~ NEWLINE* ~ filesystem_field* ~ "}" ~ NEWLINE* }
+filesystem_field = { identifier ~ ":" ~ array_literal ~ NEWLINE* }
+
+system_rule  = { "system" ~ "{" ~ NEWLINE* ~ system_field* ~ "}" ~ NEWLINE* }
+system_field = { identifier ~ ":" ~ bool_literal ~ NEWLINE* }
+
+limits_block = { "limits" ~ "{" ~ NEWLINE* ~ limits_entry* ~ "}" ~ NEWLINE* }
+limits_entry = { identifier ~ ":" ~ literal ~ NEWLINE* }
 
 model_decl  = { "model" ~ identifier ~ "{" ~ NEWLINE ~ model_field* ~ "}" ~ NEWLINE }
 model_field = _{ retry_block | capabilities_block | model_property }
@@ -31,10 +51,14 @@ raw_string = ${ "r\"" ~ (!"\"" ~ ANY)* ~ "\"" }
 int_literal   = @{ "0x" ~ ASCII_HEX_DIGIT+ | ASCII_DIGIT+ }
 float_literal = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ ~ (("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+)? }
 bool_literal  = { "true" | "false" }
+// ⚠️ Needs its own rule: a bare "none" inside the silent `literal` rule would
+// produce no `Pair`, so the builder reported "expected base expression"
+// (i.e. `let x = none` could never be parsed).
+none_literal  = { "none" }
 
-duration_literal = { int_literal ~ duration_unit }
+duration_literal = ${ int_literal ~ duration_unit }
 duration_unit    = @{ "ms" | "s" | "m" | "h" | "d" }
-byte_size_literal = { int_literal ~ byte_size_unit }
+byte_size_literal = ${ int_literal ~ byte_size_unit }
 byte_size_unit    = @{ "KB" | "MB" | "GB" }
 
 uuid_literal = @{
@@ -42,15 +66,26 @@ uuid_literal = @{
     ASCII_HEX_DIGIT{4} ~ "-" ~ ASCII_HEX_DIGIT{4} ~ "-" ~ ASCII_HEX_DIGIT{12}
 }
 
-literal = _{ float_literal | int_literal | duration_literal | byte_size_literal
-          | uuid_literal | bool_literal | raw_string | string_literal | "none" }
+// ⚠️ Order matters: the specific forms must come before int_literal, otherwise
+// they are never reached (e.g. `10s` was parsed as int `10` + identifier `s`).
+// duration/byte_size are deliberately ${ } so that a space between the number and
+// the unit is not allowed; otherwise `size: 20 spacing: 4` would swallow the
+// number together with the first letter of the next property.
+literal = _{ float_literal | duration_literal | byte_size_literal | uuid_literal
+          | int_literal | bool_literal | raw_string | string_literal | none_literal }
 
 array_literal = { "[" ~ NEWLINE? ~ (array_element ~ ("," ~ NEWLINE? ~ array_element)* ~ ","?)? ~ NEWLINE? ~ "]" }
 array_element = _{ object_expr | literal }
 
 // ---------- Expressions ----------
 
-expr = { comparison_expr }
+expr = { logical_or_expr }
+
+// or (lowest precedence) then and
+logical_or_expr  = { logical_and_expr ~ (or_op ~ logical_and_expr)* }
+or_op            = @{ "or" ~ !(ASCII_ALPHANUMERIC | "_") }
+logical_and_expr = { comparison_expr ~ (and_op ~ comparison_expr)* }
+and_op           = @{ "and" ~ !(ASCII_ALPHANUMERIC | "_") }
 
 comparison_expr = { additive_expr ~ (comparison_op ~ additive_expr)* }
 comparison_op   = { "==" | "!=" | "<=" | ">=" | "<" | ">" }
@@ -65,13 +100,22 @@ unary_expr      = { unary_op? ~ postfix_expr }
 unary_op        = { "not" | "!" | "-" }
 
 postfix_expr    = { primary_expr ~ postfix_op* }
-postfix_op      = _{ call_op | member_op | index_op }
+postfix_op      = _{ call_op | member_op | index_op | try_op }
 
 call_op         = { "(" ~ arg_list? ~ ")" }
 member_op       = { "." ~ identifier }
 index_op        = { "[" ~ expr ~ "]" }
+// `expr?` — unwrap ok(v) / return err(e) from the enclosing function.
+try_op          = { "?" }
 
-primary_expr    = _{ paren_expr | array_expr | object_expr | await_expr | match_expr | literal | identifier }
+primary_expr    = _{ lambda_expr | paren_expr | array_expr | object_expr | await_expr | match_expr | literal | identifier }
+
+// ---------- Lambda ----------
+// `x => body` / `x, y => body` / `=> body` — capture is by move.
+// Placed first in `primary_expr`: on a plain identifier the params match and
+// `=>` fails, so the choice simply backtracks to `identifier`.
+lambda_expr     = { lambda_params? ~ "=>" ~ expr }
+lambda_params   = { identifier ~ ("," ~ identifier)* }
 
 paren_expr      = { "(" ~ expr ~ ")" }
 array_expr      = { "[" ~ (expr ~ ("," ~ expr)*)? ~ "]" }
@@ -96,29 +140,35 @@ argument        = { (identifier ~ ":")? ~ expr }
 fn_decl = { "fn" ~ identifier ~ "(" ~ param_list? ~ ")" ~ return_type? ~ block ~ NEWLINE* }
 
 param_list = { param ~ ("," ~ param)* }
-param = { identifier ~ ":" ~ base_type ~ ("=" ~ expr)? }
+param = { identifier ~ ":" ~ full_type ~ ("=" ~ expr)? }
 
 return_type = { "->" ~ full_type }
-base_type = _{ array_type | primitive_type | named_type }
-full_type = { base_type ~ "?"? }
+base_type = _{ array_type | result_type | primitive_type | named_type }
+// `optional_marker` is a named rule so the builder can actually see the `?`;
+// as an anonymous literal it was dropped and `int?` silently became `int`.
+full_type = { base_type ~ optional_marker? }
+optional_marker = { "?" }
 
-primitive_type = @{ "string" | "int" | "float" | "bool" | "bytes" | "unit" | "uuid" | "timestamp" }
+primitive_type = @{ "string" | "int" | "float" | "bool" | "bytes" | "unit" | "uuid" | "timestamp" | "function" }
 named_type     = { identifier }
 array_type     = { "[" ~ base_type ~ "]" }
+result_type    = { "Result" ~ "(" ~ base_type ~ "," ~ base_type ~ ")" }
 
 block = { "{" ~ NEWLINE* ~ (statement ~ stmt_sep?)* ~ "}" }
 stmt_sep = _{ NEWLINE+ | &"}" }
 
 // ---------- Statements ----------
 
-statement = _{ if_stmt | while_stmt | for_stmt | let_stmt | assign_stmt | return_stmt | expr_stmt }
+statement = _{ if_stmt | while_stmt | for_stmt | let_stmt | var_stmt | assign_stmt | return_stmt | expr_stmt }
 
 if_stmt = { "if" ~ expr ~ block ~ else_clause? }
 else_clause = { NEWLINE* ~ "else" ~ (if_stmt | block) }
 while_stmt = { "while" ~ expr ~ block }
 for_stmt = { "for" ~ identifier ~ "in" ~ expr ~ block }
 
-let_stmt    = { "let" ~ identifier ~ (":" ~ base_type ~ "?"?)? ~ "=" ~ expr }
+let_stmt    = { "let" ~ identifier ~ (":" ~ full_type)? ~ "=" ~ expr }
+// `var` is the mutable counterpart of `let`; the shape is identical on purpose.
+var_stmt    = { "var" ~ identifier ~ (":" ~ full_type)? ~ "=" ~ expr }
 assign_stmt = { lvalue ~ assign_op ~ expr }
 lvalue      = { identifier ~ (member_op | index_op)* }
 assign_op   = { "=" | "+=" | "-=" | "*=" | "/=" }
@@ -135,6 +185,30 @@ NEWLINE    = _{ ("\n" | "\r\n")+ }
 // UI DSL — Sprint A2
 // ============================================================
 
+// component MessageBubble { prop role: string render { ... } }
+component_decl = { "component" ~ identifier ~ "{" ~ NEWLINE* ~ component_prop* ~ component_render? ~ NEWLINE* ~ "}" ~ NEWLINE* }
+component_prop = { "prop" ~ identifier ~ (":" ~ component_type)? ~ NEWLINE* }
+component_type = { base_type }
+component_render = { "render" ~ "{" ~ NEWLINE* ~ (ui_statement ~ NEWLINE*)* ~ "}" }
+component_use = {
+    !("Column" | "Row" | "Text" | "Input" | "Button" | "Card" | "Divider"
+      | "Display" | "Messages" | "Heading" | "Spacer")
+    ~ component_name ~ (component_arg)* ~ NEWLINE*
+}
+component_name = @{ ('A'..'Z') ~ (ASCII_ALPHANUMERIC | "_")* }
+component_arg = { identifier ~ ":" ~ expr }
+
+// theme Dark { color { background: "#1e1e2e" } text { size: 16 } }
+theme_decl = { "theme" ~ identifier ~ theme_default? ~ theme_extends? ~ "{" ~ NEWLINE* ~ theme_group* ~ "}" ~ NEWLINE* }
+theme_default = { "default" }
+theme_extends = { "extends" ~ identifier }
+theme_group = { identifier ~ "{" ~ NEWLINE* ~ theme_entry* ~ "}" ~ NEWLINE* }
+theme_entry = { identifier ~ ":" ~ theme_value ~ NEWLINE* }
+theme_value = _{ style_string | style_number | style_bool | identifier }
+
+// Reference to a design token: theme.color.primary
+design_token = { "theme" ~ ("." ~ identifier)+ }
+
 // ui Main = Screen "Title" { ... }
 ui_decl = { "ui" ~ identifier ~ "=" ~ screen_expr ~ NEWLINE* }
 
@@ -142,7 +216,7 @@ screen_expr = { "Screen" ~ string_literal ~ block_ui }
 
 block_ui = { "{" ~ NEWLINE* ~ ui_statement* ~ NEWLINE* ~ "}" }
 
-ui_statement = _{ state_decl_ui | display_expr | messages_expr | element_expr | ui_if | ui_for }
+ui_statement = _{ state_decl_ui | display_expr | messages_expr | component_use | element_expr | ui_if | ui_for }
 
 // @message: string = ""
 state_decl_ui = { "@" ~ identifier ~ (":" ~ base_type)? ~ "=" ~ state_value ~ NEWLINE* }
@@ -156,7 +230,9 @@ element_expr = { element_name ~ primary_arg? ~ element_modifier* ~ style_block? 
 
 element_name = @{ ('A'..'Z') ~ (ASCII_ALPHANUMERIC | "_")* }
 
-primary_arg = _{ string_literal | int_literal | float_literal | bool_literal }
+primary_arg = _{ string_literal | int_literal | float_literal | bool_literal | identifier_primary }
+// identifier as the primary argument, only when NOT followed by ":" (else it is a property)
+identifier_primary = _{ !(identifier ~ ":") ~ identifier }
 
 element_modifier = _{ element_property | binding | event_handler }
 
@@ -166,13 +242,13 @@ event_handler = { "on" ~ identifier ~ "->" ~ identifier ~ (member_op | call_op)*
 
 element_children = { "{" ~ NEWLINE* ~ ui_statement* ~ NEWLINE* ~ "}" }
 
-// if cond { ... } در UI
+// if cond { ... } inside UI
 ui_if = { "if" ~ expr ~ block_ui ~ ("else" ~ block_ui)? ~ NEWLINE* }
 
-// for item in items { ... } در UI
+// for item in items { ... } inside UI
 ui_for = { "for" ~ identifier ~ "in" ~ expr ~ block_ui ~ NEWLINE* }
 
-// مسیر expression بدون NEWLINE (برای bind و on)
+// An expression path without NEWLINE (used by bind and on)
 expression_path = { identifier ~ (member_op | call_op)* }
 
 
@@ -182,12 +258,12 @@ display_expr = { "Display" ~ identifier ~ NEWLINE* }
 // Messages list
 messages_expr = { "Messages" ~ "list" ~ ":" ~ identifier ~ NEWLINE* }
 
-// ui_statement نهایی
+// Final ui_statement
 
 // Style block: { color: "#fff", size: 24 }
 style_block = { "{" ~ NEWLINE* ~ (style_property ~ NEWLINE*)* ~ "}" }
 style_property = { identifier ~ ":" ~ style_value }
-style_value = _{ style_string | style_number | style_bool | identifier }
+style_value = _{ design_token | style_string | style_number | style_bool | identifier }
 style_string = ${ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
 style_number = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }
 style_bool = { "true" | "false" }

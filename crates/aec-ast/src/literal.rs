@@ -1,3 +1,4 @@
+use crate::expr::Expr;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,10 +51,11 @@ impl DurationUnit {
     }
 }
 
+/// One piece of an interpolated string (`"hi {name}!"` → Text, Expr, Text).
 #[derive(Debug, Clone, PartialEq)]
 pub enum InterpPart {
     Text(String),
-    Expr(String),
+    Expr(Expr),
 }
 
 impl Literal {

@@ -1,11 +1,11 @@
-//! Expressions — قلب زبان AEC
+//! Expressions — the heart of the AEC language
 
 use crate::function::Block;
 use crate::literal::Literal;
 use crate::program::Identifier;
 use crate::span::Span;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Literal(Box<LiteralExpr>),
     Identifier(Identifier),
@@ -19,6 +19,9 @@ pub enum Expr {
     Index(Box<IndexExpr>),
     Await(Box<AwaitExpr>),
     Match(Box<MatchExpr>),
+    /// `expr?` — unwraps `ok(v)` to `v`, or returns `err(e)` from the function.
+    Try(Box<TryExpr>),
+    Lambda(Box<LambdaExpr>),
 }
 
 impl Expr {
@@ -36,42 +39,44 @@ impl Expr {
             Expr::Index(e) => e.span,
             Expr::Await(e) => e.span,
             Expr::Match(e) => e.span,
+            Expr::Try(e) => e.span,
+            Expr::Lambda(e) => e.span,
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LiteralExpr {
     pub value: Literal,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ParenExpr {
     pub inner: Expr,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ArrayExpr {
     pub elements: Vec<Expr>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjectExpr {
     pub fields: Vec<ObjectField>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjectField {
     pub key: Identifier,
     pub value: Expr,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BinaryExpr {
     pub left: Expr,
     pub op: BinaryOp,
@@ -117,7 +122,7 @@ impl BinaryOp {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UnaryExpr {
     pub op: UnaryOp,
     pub operand: Expr,
@@ -130,61 +135,75 @@ pub enum UnaryOp {
     Not,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CallExpr {
     pub callee: Expr,
     pub args: Vec<Argument>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Argument {
     pub name: Option<Identifier>,
     pub value: Expr,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MemberExpr {
     pub object: Expr,
     pub property: Identifier,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IndexExpr {
     pub object: Expr,
     pub index: Expr,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AwaitExpr {
     pub inner: Expr,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct TryExpr {
+    pub inner: Expr,
+    pub span: Span,
+}
+
+/// `x => expr` / `x, y => expr` — an anonymous function. Captures by move.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LambdaExpr {
+    pub params: Vec<Identifier>,
+    pub body: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct MatchExpr {
     pub scrutinee: Expr,
     pub arms: Vec<MatchArm>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
     pub pattern: Pattern,
     pub body: MatchBody,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MatchBody {
     Block(Block),
     Expr(Expr),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     Wildcard(Span),
     Some(Identifier),
