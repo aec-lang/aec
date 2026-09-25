@@ -10,13 +10,13 @@
 
 بنا به گفتهٔ سازنده، محمدمهدی علوی، هنگام ساخت این پروژه **۱۳ ساله** بوده و تقریباً در **سه روز** آن را تا مرحلهٔ مطرح‌شده رسانده است. این سن و بازهٔ زمانی ادعای شخصی او هستند، نه نتیجهٔ مستقلاً راستی‌آزمایی‌شدهٔ git history. در معرفی بیرونی به همین دقت بیان شوند.
 
-**وضعیت محلیِ آخرین اجرای گزارش‌شده:** `cargo test --workspace --locked --no-fail-fast -q` با **۲۷۴ تست قبول، صفر شکست، یک تست ignored**؛ `cargo check --workspace --locked`، `cargo clippy --workspace --all-targets --locked -- -D warnings`، تست‌های CLI/APM، `cargo package --workspace --allow-dirty --no-verify --locked` و `git diff --check` پاک. `cargo fmt --all -- --check` به‌دلیل اختلاف‌های گستردهٔ قالب‌بندی موجود در مخزن شکست می‌خورد؛ برای پرهیز از patch نامرتبط bulk-format انجام نشد. این نتایج لینوکس محلی‌اند و اجرای واقعی CI روی macOS/Windows تأیید نشده. آخرین تغییرات عمدتاً **uncommitted** هستند؛ commit، push یا تغییر branch انجام نده مگر کاربر صریحاً بخواهد.
+**وضعیت آخرین اجرای گزارش‌شده:** `cargo test --workspace --locked --no-fail-fast -q` با **۲۷۴ تست قبول، صفر شکست، یک تست ignored**؛ `cargo check --workspace --locked`، `cargo clippy --workspace --all-targets --locked -- -D warnings`، تست‌های CLI/APM، `cargo package --workspace --allow-dirty --no-verify --locked` و `git diff --check` پاک. `cargo fmt --all -- --check` به‌دلیل اختلاف‌های گستردهٔ قالب‌بندی موجود در مخزن شکست می‌خورد؛ برای پرهیز از patch نامرتبط bulk-format انجام نشد. این نتایج لینوکس محلی‌اند؛ علاوه بر آن‌ها، GitHub Actions run `36090223034` روی Linux، macOS و Windows با build/test/package/smoke موفق بود. commitهای اصلی `8d169f8` و `47ce76f` روی `main` و `origin/main` قرار دارند.
 
-امتیاز `docs/roadmap.html` اکنون **حدود ۹۷٪ تخمینی و داخلی** است و باید با شواهد همین مخزن بازخوانی شود؛ عدد ۱۰۰٪ فقط برای دامنهٔ تعریف‌شده و پس از آزمون محیط مقصد قابل دفاع است. namespace چندلایه، type alias ساده، package workspace، release build و startup زیر Xvfb تأیید شده‌اند؛ اما nominal type، QA بصری native، CI راه‌دور، registry/signing و sandbox سیستم‌عامل هنوز اثبات نشده‌اند. این اعداد را بدون توضیح دامنه و ضعف‌های باز، به عنوان معیار مستقل بیرونی معرفی نکن.
+امتیاز `docs/roadmap.html` اکنون **حدود ۹۸٪ تخمینی و داخلی** است و باید با شواهد همین مخزن بازخوانی شود؛ عدد ۱۰۰٪ فقط برای دامنهٔ تعریف‌شده و پس از آزمون محیط مقصد قابل دفاع است. namespace چندلایه، type alias ساده، package workspace، release build، startup زیر Xvfb و CI سه‌سکویی تأیید شده‌اند؛ اما nominal type، QA بصری native، registry/signing و sandbox سیستم‌عامل هنوز اثبات نشده‌اند. این اعداد را بدون توضیح دامنه و ضعف‌های باز، به عنوان معیار مستقل بیرونی معرفی نکن.
 
 ## ۲. دستور شروع جلسهٔ بعد
 
-1. ابتدا درخواست تازهٔ کاربر را مقدم بر این چک‌لیست بدان. در این نوبت کاربر خواست هندآف خوانده شود، کار ادامه پیدا کند و شکاف‌های قابل‌تکمیل به ۱۰۰٪ برسد؛ تغییرات زیر کد و تست شده‌اند، اما commit/push انجام نشده است.
+1. ابتدا درخواست تازهٔ کاربر را مقدم بر این چک‌لیست بدان. در این نوبت کاربر خواست هندآف خوانده شود، کار ادامه پیدا کند و شکاف‌های قابل‌تکمیل به ۱۰۰٪ برسد؛ تغییرات کد و تست‌ها در commitهای `8d169f8` و `47ce76f` ثبت و به `origin/main` push شده‌اند.
 2. `git status --short`، `git diff --stat` و `git diff -- docs/roadmap.html` را پیش از ویرایش بررسی کن. تغییر قبلی کاربر در roadmap حفظ شده است. فایل‌های untracked را پاک نکن.
 3. `./scripts/ci-local.sh` را برای اجرای کامل fetch، test، clippy، package، release و smoke استفاده کن. بار اول حدود ۳۰۰–۸۰۰MB اینترنت و چند GB فضای دیسک می‌خواهد؛ اجرای بعدی از cache استفاده می‌کند. `RUN_FMT=1` فقط برای بررسی اختیاری format کل مخزن است. برای APM از `cargo run -q -p aec-cli --bin apm -- init` و سپس `add/remove/install/list/tree` و تست integration مربوط استفاده کن؛ `aec add`/`aec install` و `apm.toml` قدیمی فقط سازگاری migration دارند. مثال آخر باید خروجی بازگشت ۴۲ بدهد؛ رفتار چاپ دقیق CLI را از اجرا ببین.
 4. در کارهای مربوط به UI، علاوه بر تست واحد، پنجرهٔ واقعی، ورودی/رویداد/RTL را دستی بررسی کن؛ در محیط قبلی Chrome extension متصل نبود و QA بصری roadmap انجام نشد. `xmllint --html --noout docs/roadmap.html` موفق بود اما جای QA بصری نیست. smoke بی‌صدا و بسته‌بندی را با `timeout 12s xvfb-run -a cargo run -q -p aec-cli -- run examples/theme.aec` و `cargo package --workspace --allow-dirty --no-verify --locked` بازتولید کن.
@@ -24,11 +24,11 @@
 
 ### محدودیت‌های کاری
 
-- فقط در همین پروژه کار کن؛ تغییرات موجود را حفظ کن، `git checkout --`/reset مخرب نزن؛ commit/push/PR خودسرانه نکن.
+- فقط در همین پروژه کار کن؛ تغییرات موجود را حفظ کن، `git checkout --`/reset مخرب نزن؛ commit/push/PR را فقط در صورت درخواست صریح فعلی انجام بده.
 - فایل‌های backup پارسر (`grammar.pest.backup` و `build_ast.rs.backup`) را restore نکن.
 - `cargo fmt --all` کورکورانه اجرا نکن؛ ممکن است تغییرات گستردهٔ نامرتبط بسازد. فقط محدودهٔ تغییر لازم را قالب‌بندی کن.
 - پیام‌های تشخیصی و کامنت سورس، شامل کامنت فایل‌های `.aec`، انگلیسی بمانند؛ متن قابل‌نمایش برنامه می‌تواند فارسی باشد.
-- منبع ادعا را مشخص کن: اجرای محلی ≠ اجرای CI راه‌دور؛ محافظ مجوز مفسر ≠ sandbox سیستم‌عامل؛ نمونهٔ echo ≠ چت متصل به مدل.
+- منبع ادعا را مشخص کن: اجرای محلی ≠ اجرای CI راه‌دور؛ CI راه‌دور با run `36090223034` تأیید شده، اما محافظ مجوز مفسر ≠ sandbox سیستم‌عامل؛ نمونهٔ echo ≠ چت متصل به مدل.
 
 ## ۳. نقشهٔ معماری و جریان اجرا
 
@@ -93,12 +93,12 @@ Builtinهای اصلی در `docs/stdlib.md` دسته‌بندی شده‌اند
 
 تست‌های crateهای AST/parser/check/runtime/UI/CLI و integration در `crates/*/tests/` و `src` موجودند. تست ۲۷۴ نشان‌دهندهٔ محدودهٔ محلی است، نه benchmark، کاربر واقعی، امنیت تضمین‌شده یا سازگاری سه‌سکویی. هر آزمون جدید را اول مخصوص لایهٔ دست‌خورده و سپس در کل workspace اجرا کن. `--no-fail-fast` مانع پنهان‌ماندن شکست crateهای بعدی می‌شود.
 
-Workflow در `.github/workflows/ci.yml` برای push/PR با matrix `ubuntu-latest`، `macos-latest`، `windows-latest` و `cargo check/test/build/package/smoke --locked` نوشته شده؛ فایل و `Cargo.lock` در working tree هستند و **هیچ گزارش اجرای remote موفقی در دست نیست**. بسته‌بندی binary و installer/release هنوز در workflow راه‌دور آزموده نشده است.
+Workflow در `.github/workflows/ci.yml` برای push/PR با matrix `ubuntu-latest`، `macos-latest`، `windows-latest` و `cargo check/test/build/package/smoke --locked` نوشته شده است. Run `36090223034` روی هر سه سیستم‌عامل با build، test، package و smoke موفق شد. بسته‌بندی binary در workflow آزموده شده، اما انتشار artifact/installer و امضای release هنوز انجام نشده است.
 
 ## ۸. اسناد و فایل‌های کلیدی
 
 - `README.md`: شروع و مرزهای فعلی.
-- `docs/roadmap.html`: جدول وزنی، شکاف‌ها و مسیر تا ۱۰۰٪؛ عدد ۹۷٪ فعلی تخمین داخلی است. در ابتدای نوبت تغییراتی از کاربر در این فایل وجود داشت؛ حفظ شده‌اند.
+- `docs/roadmap.html`: جدول وزنی، شکاف‌ها و مسیر تا ۱۰۰٪؛ عدد ۹۸٪ فعلی تخمین داخلی است. در ابتدای نوبت تغییراتی از کاربر در این فایل وجود داشت؛ حفظ شده‌اند.
 - `docs/language.md`: دستور زبان نمونه و واردکردن فایل.
 - `docs/stdlib.md`: دسته‌بندی builtinها و نکتهٔ LLM/permissions.
 - `docs/components.md` و `docs/themes.md`: UI reusable و tokenها.
@@ -112,7 +112,7 @@ Workflow در `.github/workflows/ci.yml` برای push/PR با matrix `ubuntu-la
 1. **۱۸.۶، semantics ماژول:** `pub`، alias چندلایه، duplicate declaration، path resolution، cycle، private/public و type alias پیاده و تست شده‌اند؛ nominal type و registry/signing باز است.
 2. **۱۸.۴، state lifecycle:** scope/identity component و loop، rebuild واکنشی، event arguments و cleanup پیاده و تست واحد دارد؛ QA بصری پنجرهٔ واقعی در هر سه سیستم باقی است.
 3. **۱۸.۸، checker فاز بعد:** UI/state/property/type/arity/unknown-function/index diagnostics، named/default arguments و type alias اضافه شده‌اند؛ nominal type و استنتاج کامل هنوز `Any`/design باز دارند.
-4. **۱۸.۹ و ۱۸.۳، CI و distribution:** workflow سه‌سکویی با build/package/smoke اضافه شده و release/package محلی موفق است؛ گزارش remote، artifact release و امضا هنوز تأیید نشده‌اند.
+4. **۱۸.۹ و ۱۸.۳، CI و distribution:** workflow سه‌سکویی با build/package/smoke و run موفق `36090223034` اضافه شده است؛ انتشار artifact release و امضا هنوز تأیید نشده‌اند.
 5. **۱۸.۱۰، docs/demo:** راهنمای زبان، stdlib، component، theme، APM و مثال‌ها به‌روز شده‌اند؛ دموی آنلاین واقعی فقط با کلید و secret-management مناسب باقی است و نمونهٔ chat آفلاین است.
 6. **۱۸.۱۱، APM:** binary `apm` با `init`، `add`، `remove`، `install`، `list`، `tree`، manifest/lockfile و تست integration برای path dependency محلی پیاده شده‌اند؛ registry و package signing خارج از دامنهٔ فعلی‌اند.
 7. **۱۸.۱۲، فراتر از دامنه:** async/await واقعی، bytecode optimization، A2A، IDE و sandbox OS در چشم‌اندازند، نه قابلیت فعلی؛ اول مسئله و طراحی را اعتبارسنجی کن.
@@ -121,6 +121,6 @@ Workflow در `.github/workflows/ci.yml` برای push/PR با matrix `ubuntu-la
 
 ## ۱۰. وضعیت working tree هنگام تحویل
 
-در شروع نوبت قبلی، تغییر `docs/roadmap.html` از قبل موجود بود. تا این هندآف، فایل‌های اصلاح‌شده/افزوده‌شده شامل `NEXT_SESSION_HANDOFF.md`، `docs/roadmap.html`، `crates/aec-cli/src/{main,loader,package,lib}.rs`، `src/bin/apm.rs`، `scripts/ci-local.sh` و `tests/{imports,package_cli}.rs`، `crates/aec-check/src/{checker,diag,ty}.rs` و `tests/check.rs`، چند فایل runtime (`interpreter.rs`، `llm.rs`، `permissions.rs`، `stdlib.rs`، `stdlib_extended.rs`، `value.rs` و تست‌های runtime)، `crates/aec-ui/{Cargo.toml,src/renderer.rs,src/widgets.rs}`، parser/AST visibility و import، type alias، `.github/workflows/ci.yml`، `Cargo.lock`، `README.md`، `docs/apm.md`، راهنماها و نمونه‌های بالا هستند. وضعیت جدید را با `git status --short` بسنج؛ این فهرست snapshot است، نه مجوز پاک‌کردن فایل‌های دیگر.
+در شروع نوبت قبلی، تغییر `docs/roadmap.html` از قبل موجود بود. تا این هندآف، فایل‌های اصلاح‌شده/افزوده‌شده شامل `NEXT_SESSION_HANDOFF.md`، `docs/roadmap.html`، `crates/aec-cli/src/{main,loader,package,lib}.rs`، `src/bin/apm.rs`، `scripts/ci-local.sh` و `tests/{imports,package_cli}.rs`، `crates/aec-check/src/{checker,diag,ty}.rs` و `tests/check.rs`، چند فایل runtime (`interpreter.rs`، `llm.rs`، `permissions.rs`، `stdlib.rs`، `stdlib_extended.rs`، `value.rs` و تست‌های runtime)، `crates/aec-ui/{Cargo.toml,src/renderer.rs,src/widgets.rs}`، parser/AST visibility و import، type alias، `.github/workflows/ci.yml`، `Cargo.lock`، `README.md`، `docs/apm.md`، راهنماها و نمونه‌های بالا هستند. commitهای اصلی `8d169f8` و `47ce76f` روی `main` و `origin/main` هستند؛ وضعیت جدید را با `git status --short` بسنج. فایل‌های untracked از قبل موجود (`docs/AEC_Pitch_2026.pptx` و `tmp/`) را پاک نکن. این فهرست snapshot است، نه مجوز پاک‌کردن فایل‌های دیگر.
 
 **دستور اصلی برای عامل بعدی:** درخواست مستقیم کاربر و شواهد مخزن همیشه بر تاریخچهٔ این سند مقدم‌اند؛ ادعای «همه چیز تمام شده» را فقط به‌عنوان framing آرمانی ارائه بفهم، نه گزارش factual پیشرفت.

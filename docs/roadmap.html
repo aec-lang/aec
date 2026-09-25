@@ -67,7 +67,7 @@
   .donut svg { transform: rotate(-90deg); }
   .donut .track { fill: none; stroke: #1e2740; stroke-width: 16; }
   .donut .val { fill: none; stroke: url(#g1); stroke-width: 16; stroke-linecap: round;
-                stroke-dasharray: 488 503; animation: dash 1.5s cubic-bezier(.4,0,.2,1) both; }
+                stroke-dasharray: 493 503; animation: dash 1.5s cubic-bezier(.4,0,.2,1) both; }
   @keyframes dash { from { stroke-dasharray: 0 503; } }
   .donut .center { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
   .donut .num { font-size: 44px; font-weight: 700; line-height: 1; }
@@ -159,7 +159,7 @@
         این گزارش بر اساس دامنهٔ <b>واقعیِ</b> پروژه نوشته شده: AEC یک <b>زبان</b> است
         (سینتکس + Runtime + UI Engine)، نه اکوسیستمی چندساله. سند اولیه به‌عنوان آرمان کنار گذاشته شد.
       </p>
-      <div class="meta">مخزن: <span class="kbd">/home/mamadi/aec</span> · به‌روزرسانی: ۲۰۲۶-۰۹-۲۵ · <b>۲۷۴ تست سبز</b> · تغییرات جدید هنوز کامیت نشده‌اند</div>
+      <div class="meta">مخزن: <span class="kbd">/home/mamadi/aec</span> · به‌روزرسانی: ۲۰۲۶-۰۹-۲۵ · <b>۲۷۴ تست سبز</b> · <b>CI سه‌سکویی موفق</b></div>
     </div>
     <div class="donut">
       <svg width="190" height="190" viewBox="0 0 190 190">
@@ -172,7 +172,7 @@
         <circle class="val" cx="95" cy="95" r="80" />
       </svg>
       <div class="center">
-        <div class="num">۹۷<small>٪</small></div>
+        <div class="num">۹۸<small>٪</small></div>
         <div class="lbl">پیشرفت وزنی تخمینی</div>
       </div>
     </div>
@@ -182,10 +182,10 @@
     <div class="ic">✓</div>
     <div>
       <h2 style="margin:0 0 8px">چک‌لیست سادهٔ رسیدن به ۱۰۰٪</h2>
-      <p style="margin:0 0 8px">عدد فعلی ۹۷٪ است. برای ثبت ۱۰۰٪ واقعی، این چهار تصمیم/آزمایش باید انجام شوند:</p>
+      <p style="margin:0 0 8px">عدد فعلی ۹۸٪ است. برای ثبت ۱۰۰٪ واقعی، این سه تصمیم/آزمایش باقی‌مانده باید انجام شوند:</p>
       <ol style="margin:8px 18px 0; padding:0; line-height:1.9">
         <li>☐ <b>نوع nominal:</b> مشخص کنیم <span class="kbd">struct</span>/<span class="kbd">enum</span> دقیقاً چه رفتاری داشته باشند؛ type alias ساده already پیاده شده است.</li>
-        <li>☐ <b>سه سیستم‌عامل:</b> workflow روی Linux، macOS و Windows اجرا و نتیجهٔ آن ثبت شود.</li>
+        <li>☑ <b>سه سیستم‌عامل:</b> workflow روی Linux، macOS و Windows با run <span class="kbd">36090223034</span> موفق شد.</li>
         <li>☐ <b>QA بصری:</b> پنجرهٔ native با ورودی، button، state، RTL و theme در سه سیستم‌عامل بررسی شود.</li>
         <li>☐ <b>انتشار و امنیت:</b> دربارهٔ registry، امضای package و OS sandbox تصمیم نهایی و اجرای واقعی ثبت شود.</li>
       </ol>
@@ -204,7 +204,7 @@
       <br />
       اکنون import چندفایلی، <span class="kbd">pub</span>، alias عمومی و namespace چندلایه در CLI اجرا می‌شود؛
       component/theme/model/type alias، package workspace و smoke native نیز تست شده‌اند.
-      برای ۱۰۰٪ فقط nominal type، محیط‌های مقصد، registry/signing و sandbox سیستم‌عامل باقی است.
+      برای ۱۰۰٪ فقط nominal type، QA بصری، registry/signing و sandbox سیستم‌عامل باقی است.
     </div>
   </div>
 
@@ -250,15 +250,15 @@
       <tr><td class="f">Persistent Memory (SQLite)</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۱۰۰٪</span></td><td class="c">۳٪</td></tr>
       <tr><td class="f">محافظ مجوزهای درون مفسر</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۱۰۰٪</span> <span class="tag">shell.run، env و memory پایدار کنترل می‌شوند؛ OS sandbox نیست</span></td><td class="c">۳٪</td></tr>
       <tr><td class="f">Package Manager (APM)</td><td class="c">۲٪</td><td><span class="badge mid">◐ ۱۰۰٪ محلی</span> <span class="tag">path dependency؛ registry خارج از دامنه</span></td><td class="c">۲٪</td></tr>
-      <tr><td class="f">Cross-platform Build</td><td class="c">۳٪</td><td><span class="badge mid">◐ ۶۰٪</span> <span class="tag">workflow سه‌سکویی و release build؛ راه‌دور تأیید نشده</span></td><td class="c">۱.۸٪</td></tr>
+      <tr><td class="f">Cross-platform Build</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۱۰۰٪</span> <span class="tag">Linux/macOS/Windows با run 36090223034 موفق</span></td><td class="c">۳٪</td></tr>
       <tr><td class="f">Testing (۲۷۴ تست)</td><td class="c">۳٪</td><td><span class="badge mid">◐ ۹۷٪</span> <span class="tag">workspace، lint، package و regressionها سبز</span></td><td class="c">۲.۹۱٪</td></tr>
       <tr><td class="f">Docs</td><td class="c">۲٪</td><td><span class="badge mid">◐ ۹۲٪</span> <span class="tag">language/stdlib/components/APM به‌روز</span></td><td class="c">۱.۸۴٪</td></tr>
       <tr><td class="f">Examples</td><td class="c">۲٪</td><td><span class="badge mid">◐ ۹۵٪</span> <span class="tag">ماژول، UI و LLM mock</span></td><td class="c">۱.۹٪</td></tr>
-      <tr class="total"><td colspan="3">جمع وزنیِ نرمال‌شده: ۱۱۰.۳۵ از ۱۱۴</td><td class="c">≈ ۹۷٪</td></tr>
+      <tr class="total"><td colspan="3">جمع وزنیِ نرمال‌شده: ۱۱۱.۵۵ از ۱۱۴</td><td class="c">≈ ۹۸٪</td></tr>
     </table>
   </div>
   <p class="hint" style="margin-top:14px">
-    وزن‌ها جمعاً ۱۱۴ هستند. عدد ۹۷٪ از تقسیم ۱۱۰.۳۵ بر ۱۱۴ به دست آمده و فقط یک تخمین داخلی است؛
+    وزن‌ها جمعاً ۱۱۴ هستند. عدد ۹۸٪ از تقسیم ۱۱۱.۵۵ بر ۱۱۴ به دست آمده و فقط یک تخمین داخلی است؛
     برای اعلام ۱۰۰٪ باید کارهای باز پایین تمام و در محیط مقصد آزمایش شوند.
   </p>
 
@@ -286,8 +286,7 @@
     «زبان» تقریباً تمام است: <span class="kbd">var</span>، interpolation،
     <span class="kbd">Result</span>/<span class="kbd">?</span>، closure، default/named arguments،
     nested assignment و guardهای runtime اضافه شدند. namespace-aware module، `pub`، type alias،
-    مدل، component و theme نیز تست شده‌اند. nominal typeها، نتیجهٔ CI روی ویندوز/مک،
-    QA بصری native، registry/signing و sandbox سیستم‌عامل هنوز باقی است.
+    مدل، component و theme نیز تست شده‌اند. CI روی Linux، macOS و Windows با run <span class="kbd">36090223034</span> موفق بوده است؛ nominal typeها، QA بصری native، registry/signing و sandbox سیستم‌عامل هنوز باقی است.
   </p>
 
   <!-- REMAINING -->
@@ -305,6 +304,7 @@
         <li><s>Lambda + کلیدواژهٔ <span class="kbd">function</span></s> ✅ <span class="tag">۱۸.۷.۴</span></li>
         <li><s>Quick Wins (لیست builtin چکر + <span class="kbd">padding</span>)</s> ✅ <span class="tag">۱۸.۱۳</span></li>
         <li><s>رفع ۳ باگ پنهان</s> ✅ <span class="tag">none / <span class="kbd">?</span> در نوع / هشدار کاذب</span></li>
+        <li>تأیید build/test/package/smoke روی Linux، macOS و Windows <span class="tag">run 36090223034 موفق</span> ✅</li>
       </ul>
     </div>
 
@@ -325,7 +325,6 @@
             QA بصری پنجرهٔ واقعی در محیط‌های مقصد باقی است.
           </div>
         </li>
-        <li>تأیید اجرای CI روی سه سیستم‌عامل و بسته‌بندی خروجی <span class="tag">۱۸.۳ / ۱۸.۹</span></li>
         <li>Type Checker فاز ۲ (استنتاج عمیق‌تر، نوع nominal) <span class="tag">۱۸.۸</span></li>
       </ul>
     </div>
@@ -333,7 +332,7 @@
     <div class="panel list">
       <h3>🟢 تکمیل و توزیع</h3>
       <ul>
-        <li>CI سه‌سکویی با build، package و smoke test نوشته شد؛ گزارش واقعی راه‌دور و release artifact باقی است <span class="tag">۱۸.۹</span></li>
+        <li>CI سه‌سکویی با build، package و smoke test موفق شد؛ انتشار artifact release و امضای خروجی باقی است <span class="tag">۱۸.۹</span></li>
         <li>راهنمای زبان، builtin، theme، component و APM به‌روز شد <span class="tag">۱۸.۱۰</span></li>
         <li>مثال چت آفلاین، ماژول alias و LLM mock اضافه شد؛ چت متصل به کلید واقعی ندارد <span class="tag">۱۸.۱۰</span></li>
         <li>APM محلی: binary <span class="kbd">apm</span>، manifest + lockfile + <span class="kbd">init</span>/<span class="kbd">add</span>/<span class="kbd">remove</span>/<span class="kbd">install</span>/<span class="kbd">list</span>/<span class="kbd">tree</span> <span class="tag">۱۸.۱۱</span></li>
@@ -350,7 +349,7 @@
         <li>arity و overflow guard، default/named args، nested assignment، match binding، higher-order helpers و محافظ env/memory</li>
         <li>مدل‌های `model.think`، LLM timeout/response validation، type alias، namespace چندلایه و component/theme عمومی اضافه شدند</li>
         <li>بسته‌بندی workspace، release build و startup تست native زیر Xvfb با موفقیت محلی اجرا شدند؛ capture بصری کامل نیست</li>
-        <li><b>۲۷۴ تست سبز روی لینوکس</b>؛ بدون کامیت یا push جدید</li>
+        <li><b>۲۷۴ تست محلی</b> و <b>CI سه‌سکویی موفق</b>؛ QA بصری native هنوز انجام نشده</li>
       </ul>
     </div>
   </div>
@@ -358,9 +357,9 @@
   <div class="callout">
     <div class="ic">⏳</div>
     <div>
-      <b>شرط رسیدن به ۱۰۰٪:</b> تکمیل nominal typeها، آزمودن واقعی CI روی ویندوز/مک،
-      QA بصری native، انتشار/signing و تعیین policy برای registry و sandbox سیستم‌عامل. بسته‌بندی محلی و
-      release build انجام شده‌اند. <a href="language.md">راهنمای زبان</a>،
+      <b>شرط رسیدن به ۱۰۰٪:</b> تکمیل nominal typeها، QA بصری native،
+      انتشار/signing و تعیین policy برای registry و sandbox سیستم‌عامل. CI روی Linux، macOS و Windows
+      با run <span class="kbd">36090223034</span> موفق شده است. <a href="language.md">راهنمای زبان</a>،
       <a href="stdlib.md">مرجع builtinها</a> و <a href="apm.md">APM</a> اکنون در دسترس‌اند.
     </div>
   </div>
@@ -398,17 +397,17 @@
       <div class="st-top"><span class="st-name"><span class="badge ok">✓ انجام شد</span> ۶ — ماژول و چندفایلی (+ <span class="kbd">pub</span>)</span></div>
       <div class="st-desc">namespace-aware module، alias چندلایه، private/public، type alias و تست‌های CLI پیاده شدند.</div>
     </div>
-    <div class="step">
-      <div class="st-top"><span class="st-name"><span class="badge mid">◐ بخشی انجام شد</span> ۷ — Testing Framework + CI</span></div>
-      <div class="st-desc">۲۷۴ تست محلی، clippy، package workspace و workflow سه‌سکویی با build/package/smoke؛ نتیجهٔ GitHub هنوز تأیید نشده است.</div>
+    <div class="step done">
+      <div class="st-top"><span class="st-name"><span class="badge ok">✓ انجام شد</span> ۷ — Testing Framework + CI</span></div>
+      <div class="st-desc">۲۷۴ تست محلی، clippy، package workspace و workflow سه‌سکویی با build/package/smoke؛ run <span class="kbd">36090223034</span> موفق بود.</div>
     </div>
     <div class="step">
       <div class="st-top"><span class="st-name"><span class="badge mid">◐ بخشی انجام شد</span> ۸ — State Sync کامل (UI ↔ Runtime)</span></div>
       <div class="st-desc">scope component/loop، event arguments و rebuild واکنشی پیاده شده؛ QA بصری باقی است.</div>
     </div>
-    <div class="step">
-      <div class="st-top"><span class="st-name">۹ — Cross-platform Build</span></div>
-      <div class="st-desc">CI برای ویندوز/مک/لینوکس نوشته شده؛ build/package محلی موفق است، اما اجرای واقعی مقصد و artifact امضا نشده‌اند.</div>
+    <div class="step done">
+      <div class="st-top"><span class="st-name"><span class="badge ok">✓ انجام شد</span> ۹ — Cross-platform Build</span></div>
+      <div class="st-desc">Linux، macOS و Windows در run <span class="kbd">36090223034</span> با build/package/smoke موفق بودند؛ انتشار artifact release و امضا باقی است.</div>
     </div>
     <div class="step">
       <div class="st-top"><span class="st-name">۱۰ — Docs + Examples</span></div>
@@ -428,8 +427,8 @@
     <div class="ic">🧭</div>
     <div>
       <b>جمع‌بندی یک‌خطی:</b> AEC اکنون یک زبان با هستهٔ runtime، type checker، UI واکنشی،
-      حافظه، مجوز داخلی، مدل‌های LLM، import عمومی و APM محلی است. آنچه باقی مانده
-      verification خارج از این محیط و چند تصمیم طراحی است؛ عدد ۹۷٪ ادعای production کامل نیست.
+      حافظه، مجوز داخلی، مدل‌های LLM، import عمومی و APM محلی است. CI سه‌سکویی نیز موفق بوده است؛
+      آنچه باقی مانده QA بصری، registry/signing و چند تصمیم طراحی است؛ عدد ۹۸٪ ادعای production کامل نیست.
     </div>
   </div>
 
@@ -446,7 +445,7 @@
   </div>
 
   <footer>
-    AEC — گزارش وضعیت زبان · ۲۰۲۶-۰۹-۲۵ · ۲۷۴ تست سبز روی لینوکس · هدف: ۱۰۰٪ واقعی و قابل آزمون
+    AEC — گزارش وضعیت زبان · ۲۰۲۶-۰۹-۲۵ · ۲۷۴ تست محلی و CI سه‌سکویی موفق · هدف: ۱۰۰٪ واقعی و قابل آزمون
   </footer>
 </div>
 </body>
