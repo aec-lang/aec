@@ -190,24 +190,22 @@ fn sqlite_open_fails_on_unwritable_path() {
 #[test]
 fn builtins_round_trip_through_sqlite() {
     let path = temp_db("e2e");
-    let source = format!(
-        r#"
+    let source = r#"
 agent Test
 
-fn seed(path: string) -> int {{
+fn seed(path: string) -> int {
     memory.open(path)
     memory.add("c1", "user", "سلام")
     memory.add("c1", "assistant", "سلام! چطور می‌تونم کمک کنم؟")
     return memory.count("c1")
-}}
+}
 
-fn history_size() -> int {{
+fn history_size() -> int {
     return memory.count("c1")
-}}
-"#
-    );
+}
+"#;
 
-    let program = parse(&source).expect("parse should succeed");
+    let program = parse(source).expect("parse should succeed");
 
     let mut interp = Interpreter::new();
     interp.run(&program).unwrap();

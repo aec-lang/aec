@@ -2,7 +2,7 @@
 
 use aec_ast::{
     ComponentDecl, ComponentUse, ElementExpr, ElementModifier, Expr, Style, StyleValue, ThemeDecl,
-    TopLevelItem, UiFor, UiIf, UiStatement,
+    TopLevelItem, UiFor, UiIf, UiStatement, Span,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -34,32 +34,45 @@ pub struct Themes {
 impl Themes {
     /// Builds the themes from the program items and resolves the extends chain.
     pub fn from_items(items: &[TopLevelItem]) -> Self {
-        let decls: Vec<&ThemeDecl> = items
+        let modules = vec![None; items.len()];
+        Self::from_items_with_modules(items, &modules)
+    }
+
+    pub fn from_items_with_modules(
+        items: &[TopLevelItem],
+        item_modules: &[Option<String>],
+    ) -> Self {
+        let decls: Vec<(String, &ThemeDecl, Option<String>)> = items
             .iter()
-            .filter_map(|item| match item {
-                TopLevelItem::Theme(t) => Some(t),
+            .enumerate()
+            .filter_map(|(index, item)| match item {
+                TopLevelItem::Theme(theme) => {
+                    let module = item_modules.get(index).cloned().flatten();
+                    let key = theme_key(module.as_deref(), &theme.name.name, theme.is_public);
+                    Some((key, theme, module))
+                }
                 _ => None,
             })
             .collect();
 
         let mut named = HashMap::new();
-        for decl in &decls {
-            let resolved = resolve_theme(decl, &decls, &mut HashSet::new());
-            named.insert(decl.name.name.clone(), resolved);
+        for (key, theme, module) in &decls {
+            let resolved = resolve_theme(theme, &decls, key, module.as_deref(), &mut HashSet::new());
+            named.insert(key.clone(), resolved);
         }
 
-        // Active theme: the one marked default; otherwise, if exactly one theme
-        // exists, that one.
-        let default = decls
+        let roots: Vec<_> = decls
             .iter()
-            .find(|d| d.is_default)
-            .map(|d| named.get(&d.name.name).cloned().unwrap_or_default())
+            .filter(|(_, _, module)| module.is_none())
+            .collect();
+        let default = roots
+            .iter()
+            .find(|(_, theme, _)| theme.is_default)
+            .and_then(|(key, _, _)| named.get(key).cloned())
             .or_else(|| {
-                if decls.len() == 1 {
-                    named.get(&decls[0].name.name).cloned()
-                } else {
-                    None
-                }
+                (roots.len() == 1)
+                    .then(|| named.get(&roots[0].0).cloned())
+                    .flatten()
             });
 
         Self { named, default }
@@ -77,20 +90,58 @@ impl Themes {
 
 /// Flattens a theme by following its `extends` chain.
 /// `visited` guards against cycles.
+fn theme_key(module: Option<&str>, name: &str, is_public: bool) -> String {
+    match module {
+        Some(module) if is_public => format!("{}.{}", module, name),
+        Some(module) => format!("{}::{}", module, name),
+        None => name.to_string(),
+    }
+}
+
+fn scoped_component_name(module: Option<&str>, name: &str) -> String {
+    module
+        .map(|module| format!("{}::{}", module, name))
+        .unwrap_or_else(|| name.to_string())
+}
+
+/// Flattens a theme by following its `extends` chain.
 fn resolve_theme(
     decl: &ThemeDecl,
-    all: &[&ThemeDecl],
+    all: &[(String, &ThemeDecl, Option<String>)],
+    key: &str,
+    module: Option<&str>,
     visited: &mut HashSet<String>,
 ) -> ResolvedTheme {
-    if !visited.insert(decl.name.name.clone()) {
+    if !visited.insert(key.to_string()) {
         return ResolvedTheme::default();
     }
 
     let mut resolved = decl
         .extends
         .as_ref()
-        .and_then(|parent| all.iter().find(|d| d.name.name == parent.name))
-        .map(|parent| resolve_theme(parent, all, visited))
+        .and_then(|parent| {
+            let private_key = scoped_component_name(module, &parent.name);
+            let public_key = module
+                .map(|module| format!("{}.{}", module, parent.name))
+                .unwrap_or_else(|| parent.name.clone());
+            all.iter()
+                .find(|(candidate_key, _, _)| {
+                    candidate_key == &private_key || candidate_key == &public_key
+                })
+                .or_else(|| {
+                    all.iter()
+                        .find(|(_, candidate, _)| candidate.name.name == parent.name)
+                })
+                .map(|(parent_key, parent, parent_module)| {
+                    resolve_theme(
+                        parent,
+                        all,
+                        parent_key,
+                        parent_module.as_deref(),
+                        visited,
+                    )
+                })
+        })
         .unwrap_or_default();
 
     for group in &decl.groups {
@@ -147,6 +198,19 @@ impl WidgetStyle {
     }
 }
 
+impl Default for WidgetStyle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EventAction {
+    pub handler: Expr,
+    pub span: Span,
+    pub scope: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum Widget {
     Column(Vec<Widget>, WidgetStyle),
@@ -167,7 +231,7 @@ pub enum Widget {
     },
     Button {
         label: String,
-        on_click: Option<String>,
+        on_click: Option<EventAction>,
         style: WidgetStyle,
     },
     Card(Vec<Widget>, WidgetStyle),
@@ -198,8 +262,9 @@ pub struct UiState {
     pub values: HashMap<String, UiValue>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum UiValue {
+    None,
     String(String),
     Int(i64),
     Float(f64),
@@ -211,6 +276,7 @@ pub enum UiValue {
 impl UiValue {
     pub fn as_string(&self) -> String {
         match self {
+            UiValue::None => "none".to_string(),
             UiValue::String(s) => s.clone(),
             UiValue::Int(n) => n.to_string(),
             UiValue::Float(f) => f.to_string(),
@@ -222,9 +288,11 @@ impl UiValue {
 
     pub fn as_bool(&self) -> bool {
         match self {
+            UiValue::None => false,
             UiValue::Bool(b) => *b,
             UiValue::String(s) => !s.is_empty(),
             UiValue::Int(n) => *n != 0,
+            UiValue::Float(n) => *n != 0.0,
             _ => false,
         }
     }
@@ -233,6 +301,18 @@ impl UiValue {
         match self {
             UiValue::Array(a) => a.clone(),
             _ => vec![],
+        }
+    }
+
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            UiValue::None => false,
+            UiValue::String(value) => !value.is_empty(),
+            UiValue::Int(value) => *value != 0,
+            UiValue::Float(value) => *value != 0.0,
+            UiValue::Bool(value) => *value,
+            UiValue::Array(value) => !value.is_empty(),
+            UiValue::Object(value) => !value.is_empty(),
         }
     }
 }
@@ -262,13 +342,48 @@ impl UiState {
     pub fn get_value(&self, name: &str) -> Option<&UiValue> {
         self.values.get(name)
     }
+
+    fn scoped_key(scope: &str, name: &str) -> String {
+        format!("{}::{}", scope, name)
+    }
+
+    fn get_scoped_value(&self, scope: Option<&str>, name: &str) -> Option<&UiValue> {
+        let key = scope.map(|scope| Self::scoped_key(scope, name));
+        key.and_then(|key| self.values.get(&key))
+            .or_else(|| self.values.get(name))
+    }
+
+    fn set_scoped_value(&mut self, scope: Option<&str>, name: &str, value: UiValue) {
+        let key = scope.map(|scope| Self::scoped_key(scope, name));
+        self.values.insert(key.unwrap_or_else(|| name.to_string()), value);
+    }
+
+    fn retain_scopes(&mut self, active: &HashSet<String>) {
+        self.values.retain(|key, _| {
+            !key.contains("::")
+                || active
+                    .iter()
+                    .any(|scope| key.starts_with(&format!("{}::", scope)))
+        });
+    }
+}
+
+impl Default for UiState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Build context: components, the active theme, and the recursion guard.
 struct BuildCtx<'a> {
     components: &'a ComponentRegistry,
     theme: &'a ResolvedTheme,
+    themes: &'a Themes,
     active: HashSet<String>,
+    scope: Option<String>,
+    module: Option<String>,
+    next_scope: usize,
+    used_scopes: HashSet<String>,
 }
 
 pub fn build_widgets(statements: &[UiStatement], state: &mut UiState) -> Vec<Widget> {
@@ -306,9 +421,16 @@ fn build_widgets_full(
     let mut ctx = BuildCtx {
         components,
         theme: &active_theme,
+        themes,
         active: HashSet::new(),
+        scope: None,
+        module: None,
+        next_scope: 0,
+        used_scopes: HashSet::new(),
     };
-    build_widgets_in_context(statements, state, &mut ctx)
+    let widgets = build_widgets_in_context(statements, state, &mut ctx);
+    state.retain_scopes(&ctx.used_scopes);
+    widgets
 }
 
 fn build_widgets_in_context(
@@ -316,10 +438,20 @@ fn build_widgets_in_context(
     state: &mut UiState,
     ctx: &mut BuildCtx,
 ) -> Vec<Widget> {
+    for statement in statements {
+        if let UiStatement::State(declaration) = statement {
+            let key = state_key(ctx.scope.as_deref(), &declaration.name.name);
+            if !state.values.contains_key(&key) {
+                let value = expr_to_value(&declaration.initial, state, ctx.scope.as_deref());
+                state.values.insert(key, value);
+            }
+        }
+    }
+
     let mut widgets = Vec::new();
-    for stmt in statements {
-        if let Some(w) = build_widget_in_context(stmt, state, ctx) {
-            widgets.push(w);
+    for statement in statements {
+        if let Some(widget) = build_widget_in_context(statement, state, ctx) {
+            widgets.push(widget);
         }
     }
     widgets
@@ -331,11 +463,7 @@ fn build_widget_in_context(
     ctx: &mut BuildCtx,
 ) -> Option<Widget> {
     match stmt {
-        UiStatement::State(s) => {
-            let val = expr_to_value(&s.initial, state);
-            state.values.insert(s.name.name.clone(), val);
-            None
-        }
+        UiStatement::State(_) => None,
         UiStatement::Element(el) => Some(build_element_in_context(el, state, ctx)),
         UiStatement::If(ui_if) => Some(build_if_in_context(ui_if, state, ctx)),
         UiStatement::For(ui_for) => Some(build_for_in_context(ui_for, state, ctx)),
@@ -345,34 +473,70 @@ fn build_widget_in_context(
 
 fn build_component_in_context(
     component: &ComponentUse,
-    state: &UiState,
+    state: &mut UiState,
     ctx: &mut BuildCtx,
 ) -> Option<Widget> {
-    let name = component.name.name.clone();
-    if !ctx.active.insert(name.clone()) {
+    let requested_name = component.name.name.clone();
+    let lookup_name = if requested_name.contains('.') {
+        ctx.module
+            .as_deref()
+            .map(|module| format!("{}.{}", module, requested_name))
+            .unwrap_or_else(|| requested_name.clone())
+    } else {
+        ctx.module
+            .as_deref()
+            .map(|module| format!("{}::{}", module, requested_name))
+            .unwrap_or_else(|| requested_name.clone())
+    };
+    let declaration = ctx
+        .components
+        .get(&lookup_name)
+        .or_else(|| ctx.components.get(&requested_name))
+        .cloned()?;
+    let module = if requested_name.contains('.') {
+        let qualified_requested = ctx
+            .module
+            .as_deref()
+            .map(|module| format!("{}.{}", module, requested_name))
+            .unwrap_or_else(|| requested_name.clone());
+        qualified_requested
+            .rsplit_once('.')
+            .map(|(module, _)| module.to_string())
+    } else {
+        ctx.module.clone()
+    };
+    let identity = format!(
+        "{}::{}",
+        module.as_deref().unwrap_or_default(),
+        declaration.name.name
+    );
+    if !ctx.active.insert(identity.clone()) {
         return None;
     }
 
-    // Clone the component reference so the borrow on ctx is released.
-    let components = ctx.components;
-    let result = components.get(&name).and_then(|decl| {
-        decl.render.as_ref().map(|body| {
-            let mut component_state = state.clone();
-            for prop in &component.props {
-                component_state
-                    .values
-                    .insert(prop.name.name.clone(), expr_to_value(&prop.value, state));
-            }
-            Widget::Container(build_widgets_in_context(body, &mut component_state, ctx))
-        })
+    let result = declaration.render.as_ref().map(|body| {
+        let scope = format!("component:{}:{}", identity, ctx.next_scope);
+        ctx.next_scope += 1;
+        ctx.used_scopes.insert(scope.clone());
+        let previous_scope = ctx.scope.replace(scope.clone());
+        let previous_module = ctx.module.clone();
+        ctx.module = module;
+        for prop in &component.props {
+            let value = expr_to_value(&prop.value, state, previous_scope.as_deref());
+            state.set_scoped_value(Some(&scope), &prop.name.name, value);
+        }
+        let widgets = build_widgets_in_context(body, state, ctx);
+        ctx.scope = previous_scope;
+        ctx.module = previous_module;
+        Widget::Container(widgets)
     });
 
-    ctx.active.remove(&name);
+    ctx.active.remove(&identity);
     result
 }
 
 fn build_if_in_context(ui_if: &UiIf, state: &mut UiState, ctx: &mut BuildCtx) -> Widget {
-    let condition = eval_condition(&ui_if.condition, state);
+    let condition = eval_condition(&ui_if.condition, state, ctx.scope.as_deref());
     if condition {
         Widget::If {
             condition: true,
@@ -395,21 +559,16 @@ fn build_if_in_context(ui_if: &UiIf, state: &mut UiState, ctx: &mut BuildCtx) ->
 }
 
 fn build_for_in_context(ui_for: &UiFor, state: &mut UiState, ctx: &mut BuildCtx) -> Widget {
-    let items = if let Expr::Identifier(id) = &ui_for.iterable {
-        state
-            .get_value(&id.name)
-            .map(|v| v.as_array())
-            .unwrap_or_default()
-    } else {
-        vec![]
-    };
-
+    let items = expr_to_value(&ui_for.iterable, state, ctx.scope.as_deref()).as_array();
     let mut all_widgets = Vec::new();
-    for item in items {
-        let mut temp_state = state.clone();
-        temp_state.values.insert(ui_for.variable.name.clone(), item);
-        let widgets = build_widgets_in_context(&ui_for.body, &mut temp_state, ctx);
-        all_widgets.extend(widgets);
+    for (index, item) in items.into_iter().enumerate() {
+        let scope = format!("loop:{}:{}:{}", ui_for.variable.name, index, ctx.next_scope);
+        ctx.next_scope += 1;
+        ctx.used_scopes.insert(scope.clone());
+        let previous_scope = ctx.scope.replace(scope.clone());
+        state.set_scoped_value(Some(&scope), &ui_for.variable.name, item);
+        all_widgets.extend(build_widgets_in_context(&ui_for.body, state, ctx));
+        ctx.scope = previous_scope;
     }
 
     Widget::For {
@@ -418,136 +577,395 @@ fn build_for_in_context(ui_for: &UiFor, state: &mut UiState, ctx: &mut BuildCtx)
     }
 }
 
-/// Text of an interpolated string (`"hi {name}"`), evaluated against the UI state.
-fn eval_interpolated(parts: &[aec_ast::InterpPart], state: &UiState) -> String {
+fn state_key(scope: Option<&str>, name: &str) -> String {
+    scope.map(|scope| format!("{}::{}", scope, name)).unwrap_or_else(|| name.to_string())
+}
+
+fn eval_interpolated(
+    parts: &[aec_ast::InterpPart],
+    state: &UiState,
+    scope: Option<&str>,
+) -> String {
     parts
         .iter()
         .map(|part| match part {
             aec_ast::InterpPart::Text(text) => text.clone(),
-            aec_ast::InterpPart::Expr(expr) => eval_text_expr(expr, state),
+            aec_ast::InterpPart::Expr(expr) => eval_text_expr(expr, state, scope),
         })
         .collect()
 }
 
-fn eval_condition(expr: &Expr, state: &UiState) -> bool {
+fn eval_condition(expr: &Expr, state: &UiState, scope: Option<&str>) -> bool {
+    eval_ui_value(expr, state, scope).is_truthy()
+}
+
+fn eval_text_expr(expr: &Expr, state: &UiState, scope: Option<&str>) -> String {
+    eval_ui_value(expr, state, scope).as_string()
+}
+
+fn expr_to_string(expr: &Expr, state: &UiState, scope: Option<&str>) -> Option<String> {
+    Some(eval_text_expr(expr, state, scope))
+}
+
+fn expr_to_value(expr: &Expr, state: &UiState, scope: Option<&str>) -> UiValue {
+    eval_ui_value(expr, state, scope)
+}
+
+fn eval_ui_value(expr: &Expr, state: &UiState, scope: Option<&str>) -> UiValue {
     match expr {
-        Expr::Literal(lit) => match &lit.value {
-            aec_ast::Literal::Bool(b) => *b,
-            _ => false,
+        Expr::Literal(literal) => match &literal.value {
+            aec_ast::Literal::None => UiValue::None,
+            aec_ast::Literal::String(value) | aec_ast::Literal::RawString(value) => {
+                UiValue::String(value.clone())
+            }
+            aec_ast::Literal::Interpolated(parts) => {
+                UiValue::String(eval_interpolated(parts, state, scope))
+            }
+            aec_ast::Literal::Int(value) => UiValue::Int(*value),
+            aec_ast::Literal::Float(value) => UiValue::Float(*value),
+            aec_ast::Literal::Bool(value) => UiValue::Bool(*value),
+            aec_ast::Literal::Uuid(value) => UiValue::String(value.to_string()),
+            aec_ast::Literal::ByteSize(value) => UiValue::Int(*value as i64),
+            aec_ast::Literal::Duration(value) => {
+                UiValue::Int(value.value.saturating_mul(value.unit.to_ms()) as i64)
+            }
         },
-        Expr::Identifier(id) => state.get_bool(&id.name),
-        Expr::Unary(u) => {
-            if matches!(u.op, aec_ast::UnaryOp::Not) {
-                !eval_condition(&u.operand, state)
-            } else {
-                false
+        Expr::Identifier(identifier) => state
+            .get_scoped_value(scope, &identifier.name)
+            .cloned()
+            .unwrap_or(UiValue::String(String::new())),
+        Expr::Paren(parenthesized) => eval_ui_value(&parenthesized.inner, state, scope),
+        Expr::Array(array) => UiValue::Array(
+            array
+                .elements
+                .iter()
+                .map(|element| eval_ui_value(element, state, scope))
+                .collect(),
+        ),
+        Expr::Object(object) => {
+            let mut values = HashMap::new();
+            for field in &object.fields {
+                values.insert(
+                    field.key.name.clone(),
+                    eval_ui_value(&field.value, state, scope),
+                );
+            }
+            UiValue::Object(values)
+        }
+        Expr::Unary(unary) => {
+            let value = eval_ui_value(&unary.operand, state, scope);
+            match unary.op {
+                aec_ast::UnaryOp::Not => UiValue::Bool(!value.is_truthy()),
+                aec_ast::UnaryOp::Neg => match value {
+                    UiValue::Int(value) => UiValue::Int(value.saturating_neg()),
+                    UiValue::Float(value) => UiValue::Float(-value),
+                    _ => UiValue::None,
+                },
             }
         }
-        Expr::Binary(b) => {
-            use aec_ast::BinaryOp;
-            match b.op {
-                BinaryOp::Eq => eval_value(&b.left, state) == eval_value(&b.right, state),
-                BinaryOp::Neq => eval_value(&b.left, state) != eval_value(&b.right, state),
-                BinaryOp::And => eval_condition(&b.left, state) && eval_condition(&b.right, state),
-                BinaryOp::Or => eval_condition(&b.left, state) || eval_condition(&b.right, state),
+        Expr::Binary(binary) => {
+            let left = eval_ui_value(&binary.left, state, scope);
+            let right = eval_ui_value(&binary.right, state, scope);
+            ui_binary(binary.op, left, right)
+        }
+        Expr::Member(member) => match eval_ui_value(&member.object, state, scope) {
+            UiValue::Object(values) => values
+                .get(&member.property.name)
+                .cloned()
+                .unwrap_or(UiValue::None),
+            _ => UiValue::None,
+        },
+        Expr::Index(index) => {
+            let object = eval_ui_value(&index.object, state, scope);
+            let key = eval_ui_value(&index.index, state, scope);
+            match (object, key) {
+                (UiValue::Array(values), UiValue::Int(index)) => {
+                    let index = if index < 0 { values.len() as i64 + index } else { index };
+                    if index < 0 || index as usize >= values.len() {
+                        UiValue::None
+                    } else {
+                        values[index as usize].clone()
+                    }
+                }
+                (UiValue::String(value), UiValue::Int(index)) => {
+                    let characters: Vec<char> = value.chars().collect();
+                    let index = if index < 0 { characters.len() as i64 + index } else { index };
+                    if index < 0 || index as usize >= characters.len() {
+                        UiValue::None
+                    } else {
+                        UiValue::String(characters[index as usize].to_string())
+                    }
+                }
+                (UiValue::Object(values), UiValue::String(key)) => {
+                    values.get(&key).cloned().unwrap_or(UiValue::None)
+                }
+                _ => UiValue::None,
+            }
+        }
+        Expr::Call(call) => eval_ui_call(call, state, scope),
+        _ => UiValue::None,
+    }
+}
+
+fn eval_ui_call(call: &aec_ast::CallExpr, state: &UiState, scope: Option<&str>) -> UiValue {
+    let name = match &call.callee {
+        Expr::Identifier(identifier) => identifier.name.clone(),
+        Expr::Member(member) => match &member.object {
+            Expr::Identifier(namespace) => format!("{}.{}", namespace.name, member.property.name),
+            _ => return UiValue::None,
+        },
+        _ => return UiValue::None,
+    };
+    let args: Vec<UiValue> = call
+        .args
+        .iter()
+        .map(|argument| eval_ui_value(&argument.value, state, scope))
+        .collect();
+    match name.as_str() {
+        "range" => {
+            let (start, end) = match args.as_slice() {
+                [UiValue::Int(end)] => (0, *end),
+                [UiValue::Int(start), UiValue::Int(end)] => (*start, *end),
+                _ => return UiValue::None,
+            };
+            if start < 0 || end < start || end - start > 10_000_000 {
+                return UiValue::None;
+            }
+            UiValue::Array((start..end).map(UiValue::Int).collect())
+        }
+        "len" => match args.first() {
+            Some(UiValue::String(value)) => UiValue::Int(value.chars().count() as i64),
+            Some(UiValue::Array(value)) => UiValue::Int(value.len() as i64),
+            Some(UiValue::Object(value)) => UiValue::Int(value.len() as i64),
+            _ => UiValue::None,
+        },
+        "str" => args.first().map(|value| UiValue::String(value.as_string())).unwrap_or(UiValue::None),
+        "int" => match args.first() {
+            Some(UiValue::Int(value)) => UiValue::Int(*value),
+            Some(UiValue::Float(value)) => UiValue::Int(*value as i64),
+            Some(UiValue::String(value)) => value.parse().map(UiValue::Int).unwrap_or(UiValue::None),
+            _ => UiValue::None,
+        },
+        "float" => match args.first() {
+            Some(UiValue::Int(value)) => UiValue::Float(*value as f64),
+            Some(UiValue::Float(value)) => UiValue::Float(*value),
+            Some(UiValue::String(value)) => value.parse().map(UiValue::Float).unwrap_or(UiValue::None),
+            _ => UiValue::None,
+        },
+        "upper" | "lower" | "trim" => match args.first() {
+            Some(UiValue::String(value)) => UiValue::String(match name.as_str() {
+                "upper" => value.to_uppercase(),
+                "lower" => value.to_lowercase(),
+                _ => value.trim().to_string(),
+            }),
+            _ => UiValue::None,
+        },
+        "split" => match args.as_slice() {
+            [UiValue::String(value), UiValue::String(separator)] => UiValue::Array(
+                value.split(separator.as_str()).map(|part| UiValue::String(part.to_string())).collect(),
+            ),
+            _ => UiValue::None,
+        },
+        "first" | "last" => match args.first() {
+            Some(UiValue::Array(values)) => {
+                if name == "first" {
+                    values.first().cloned().unwrap_or(UiValue::None)
+                } else {
+                    values.last().cloned().unwrap_or(UiValue::None)
+                }
+            }
+            _ => UiValue::None,
+        },
+        "push" => match args.as_slice() {
+            [UiValue::Array(values), value] => {
+                let mut values = values.clone();
+                values.push(value.clone());
+                UiValue::Array(values)
+            }
+            _ => UiValue::None,
+        },
+        "pop" => match args.first() {
+            Some(UiValue::Array(values)) => values.last().cloned().unwrap_or(UiValue::None),
+            _ => UiValue::None,
+        },
+        "abs" => match args.first() {
+            Some(UiValue::Int(value)) => UiValue::Int(value.saturating_abs()),
+            Some(UiValue::Float(value)) => UiValue::Float(value.abs()),
+            _ => UiValue::None,
+        },
+        "min" | "max" => match args.as_slice() {
+            [UiValue::Int(left), UiValue::Int(right)] => UiValue::Int(if name == "min" { *left.min(right) } else { *left.max(right) }),
+            [UiValue::Float(left), UiValue::Float(right)] => UiValue::Float(if name == "min" { left.min(*right) } else { left.max(*right) }),
+            _ => UiValue::None,
+        },
+        _ => UiValue::None,
+    }
+}
+
+fn ui_binary(op: aec_ast::BinaryOp, left: UiValue, right: UiValue) -> UiValue {
+    use aec_ast::BinaryOp;
+    match op {
+        BinaryOp::Eq => UiValue::Bool(ui_values_equal(&left, &right)),
+        BinaryOp::Neq => UiValue::Bool(!ui_values_equal(&left, &right)),
+        BinaryOp::And => UiValue::Bool(left.is_truthy() && right.is_truthy()),
+        BinaryOp::Or => UiValue::Bool(left.is_truthy() || right.is_truthy()),
+        BinaryOp::Add => match (left, right) {
+            (UiValue::String(left), UiValue::String(right)) => UiValue::String(left + &right),
+            (UiValue::Int(left), UiValue::Int(right)) => UiValue::Int(left.saturating_add(right)),
+            (UiValue::Float(left), UiValue::Float(right)) => UiValue::Float(left + right),
+            (UiValue::Int(left), UiValue::Float(right)) => UiValue::Float(left as f64 + right),
+            (UiValue::Float(left), UiValue::Int(right)) => UiValue::Float(left + right as f64),
+            (UiValue::Array(mut left), UiValue::Array(right)) => {
+                left.extend(right);
+                UiValue::Array(left)
+            }
+            _ => UiValue::None,
+        },
+        BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+            match (left, right) {
+                (UiValue::Int(left), UiValue::Int(right)) => {
+                    let result = match op {
+                        BinaryOp::Sub => left.checked_sub(right),
+                        BinaryOp::Mul => left.checked_mul(right),
+                        BinaryOp::Div if right != 0 => left.checked_div(right),
+                        BinaryOp::Mod if right != 0 => left.checked_rem(right),
+                        _ => None,
+                    };
+                    result.map(UiValue::Int).unwrap_or(UiValue::None)
+                }
+                (UiValue::Float(left), UiValue::Float(right)) => UiValue::Float(match op {
+                    BinaryOp::Sub => left - right,
+                    BinaryOp::Mul => left * right,
+                    BinaryOp::Div if right != 0.0 => left / right,
+                    BinaryOp::Mod if right != 0.0 => left % right,
+                    _ => return UiValue::None,
+                }),
+                _ => UiValue::None,
+            }
+        }
+        BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Lte | BinaryOp::Gte => {
+            let ordering = match (&left, &right) {
+                (UiValue::Int(left), UiValue::Int(right)) => left.partial_cmp(right),
+                (UiValue::Float(left), UiValue::Float(right)) => left.partial_cmp(right),
+                (UiValue::String(left), UiValue::String(right)) => Some(left.cmp(right)),
+                _ => None,
+            };
+            let Some(ordering) = ordering else { return UiValue::Bool(false) };
+            UiValue::Bool(match op {
+                BinaryOp::Lt => ordering.is_lt(),
+                BinaryOp::Gt => ordering.is_gt(),
+                BinaryOp::Lte => ordering.is_le(),
+                BinaryOp::Gte => ordering.is_ge(),
                 _ => false,
-            }
+            })
         }
+    }
+}
+
+fn ui_values_equal(left: &UiValue, right: &UiValue) -> bool {
+    match (left, right) {
+        (UiValue::None, UiValue::None) => true,
+        (UiValue::String(left), UiValue::String(right)) => left == right,
+        (UiValue::Int(left), UiValue::Int(right)) => left == right,
+        (UiValue::Float(left), UiValue::Float(right)) => left == right,
+        (UiValue::Int(left), UiValue::Float(right)) => *left as f64 == *right,
+        (UiValue::Float(left), UiValue::Int(right)) => *left == *right as f64,
+        (UiValue::Bool(left), UiValue::Bool(right)) => left == right,
+        (UiValue::Array(left), UiValue::Array(right)) => left == right,
+        (UiValue::Object(left), UiValue::Object(right)) => left == right,
         _ => false,
     }
 }
 
-fn eval_value(expr: &Expr, state: &UiState) -> String {
-    match expr {
-        Expr::Literal(lit) => match &lit.value {
-            aec_ast::Literal::String(s) => s.clone(),
-            aec_ast::Literal::Int(n) => n.to_string(),
-            aec_ast::Literal::Bool(b) => b.to_string(),
-            aec_ast::Literal::Interpolated(parts) => eval_interpolated(parts, state),
-            _ => String::new(),
-        },
-        Expr::Identifier(id) => state.get_string(&id.name),
-        _ => String::new(),
+fn ui_value_to_style(value: UiValue) -> Option<StyleValue> {
+    match value {
+        UiValue::None => None,
+        UiValue::String(value) => Some(StyleValue::String(value)),
+        UiValue::Int(value) => Some(StyleValue::Int(value)),
+        UiValue::Float(value) => Some(StyleValue::Float(value)),
+        UiValue::Bool(value) => Some(StyleValue::Bool(value)),
+        UiValue::Array(_) | UiValue::Object(_) => None,
     }
 }
-
 fn build_element_in_context(el: &ElementExpr, state: &mut UiState, ctx: &mut BuildCtx) -> Widget {
-    let ws = build_element_style(el, ctx.theme);
+    let scope = ctx.scope.clone();
+    let ws = build_element_style(
+        el,
+        ctx.themes,
+        ctx.theme,
+        ctx.module.as_deref(),
+        scope.as_deref(),
+        state,
+    );
 
     match el.name.name.as_str() {
-        "Column" => {
-            let children = el
-                .children
+        "Column" => Widget::Column(
+            el.children
                 .as_ref()
-                .map(|c| build_widgets_in_context(c, state, ctx))
-                .unwrap_or_default();
-            Widget::Column(children, ws)
-        }
-        "Row" => {
-            let children = el
-                .children
+                .map(|children| build_widgets_in_context(children, state, ctx))
+                .unwrap_or_default(),
+            ws,
+        ),
+        "Row" => Widget::Row(
+            el.children
                 .as_ref()
-                .map(|c| build_widgets_in_context(c, state, ctx))
-                .unwrap_or_default();
-            Widget::Row(children, ws)
-        }
-        "Card" => {
-            let children = el
-                .children
+                .map(|children| build_widgets_in_context(children, state, ctx))
+                .unwrap_or_default(),
+            ws,
+        ),
+        "Card" => Widget::Card(
+            el.children
                 .as_ref()
-                .map(|c| build_widgets_in_context(c, state, ctx))
-                .unwrap_or_default();
-            Widget::Card(children, apply_surface_default(ws, ctx.theme))
-        }
-        "Text" => {
-            let text = if let Some(arg) = &el.primary_arg {
-                eval_text_expr(arg, state)
-            } else {
-                String::new()
-            };
-            Widget::Text(text, apply_text_defaults(ws, ctx.theme))
-        }
+                .map(|children| build_widgets_in_context(children, state, ctx))
+                .unwrap_or_default(),
+            apply_surface_default(ws, ctx.theme),
+        ),
+        "Text" => Widget::Text(
+            el.primary_arg
+                .as_ref()
+                .map(|argument| eval_text_expr(argument, state, scope.as_deref()))
+                .unwrap_or_default(),
+            apply_text_defaults(ws, ctx.theme),
+        ),
         "Display" => {
-            let ws = apply_text_defaults(ws, ctx.theme);
-            if let Some(Expr::Identifier(id)) = &el.primary_arg {
-                Widget::Display {
-                    var_name: id.name.clone(),
-                    style: ws,
-                }
-            } else {
-                Widget::Display {
-                    var_name: "".to_string(),
-                    style: ws,
-                }
-            }
-        }
-        "Divider" => Widget::Divider,
-        "Heading" => {
-            let text = el
+            let style = apply_text_defaults(ws, ctx.theme);
+            let var_name = el
                 .primary_arg
                 .as_ref()
-                .and_then(|e| expr_to_string(e, state))
+                .and_then(|argument| match argument {
+                    Expr::Identifier(identifier) => Some(state_key(scope.as_deref(), &identifier.name)),
+                    _ => None,
+                })
                 .unwrap_or_default();
-            Widget::Heading(text, apply_text_defaults(ws, ctx.theme))
+            Widget::Display { var_name, style }
         }
+        "Divider" => Widget::Divider,
+        "Heading" => Widget::Heading(
+            el.primary_arg
+                .as_ref()
+                .and_then(|argument| expr_to_string(argument, state, scope.as_deref()))
+                .unwrap_or_default(),
+            apply_text_defaults(ws, ctx.theme),
+        ),
         "Spacer" => Widget::Spacer,
         "Input" => {
             let mut bind_target = None;
             let mut placeholder = None;
-            for m in &el.modifiers {
-                match m {
-                    ElementModifier::Binding(b) => bind_target = Some(b.target.name.clone()),
-                    ElementModifier::Property(p) => {
-                        if p.name.name == "placeholder" {
-                            placeholder = expr_to_string(&p.value, state);
-                        }
+            for modifier in &el.modifiers {
+                match modifier {
+                    ElementModifier::Binding(binding) => {
+                        bind_target = Some(state_key(scope.as_deref(), &binding.target.name));
+                    }
+                    ElementModifier::Property(property) if property.name.name == "placeholder" => {
+                        placeholder = expr_to_string(&property.value, state, scope.as_deref());
                     }
                     _ => {}
                 }
             }
             let value = bind_target
                 .as_ref()
-                .map(|t| state.get_string(t))
+                .and_then(|target| state.get_value(target))
+                .map(|value| value.as_string())
                 .unwrap_or_default();
             Widget::Input {
                 bind_target,
@@ -560,16 +978,16 @@ fn build_element_in_context(el: &ElementExpr, state: &mut UiState, ctx: &mut Bui
             let label = el
                 .primary_arg
                 .as_ref()
-                .and_then(|e| expr_to_string(e, state))
+                .and_then(|argument| expr_to_string(argument, state, scope.as_deref()))
                 .unwrap_or_else(|| "Button".to_string());
-            let mut on_click = None;
-            for m in &el.modifiers {
-                if let ElementModifier::Event(e) = m {
-                    if e.event.name == "click" {
-                        on_click = extract_fn_name(&e.handler);
-                    }
-                }
-            }
+            let on_click = el.modifiers.iter().find_map(|modifier| match modifier {
+                ElementModifier::Event(event) if event.event.name == "click" => Some(EventAction {
+                    handler: event.handler.clone(),
+                    span: event.span,
+                    scope: scope.clone(),
+                }),
+                _ => None,
+            });
             Widget::Button {
                 label,
                 on_click,
@@ -577,211 +995,168 @@ fn build_element_in_context(el: &ElementExpr, state: &mut UiState, ctx: &mut Bui
             }
         }
         "Messages" => {
-            let mut source = String::new();
-            for m in &el.modifiers {
-                if let ElementModifier::Property(p) = m {
-                    if p.name.name == "list" || p.name.name == "data" {
-                        if let Expr::Identifier(id) = &p.value {
-                            source = id.name.clone();
-                        }
+            let source = el.modifiers.iter().find_map(|modifier| match modifier {
+                ElementModifier::Property(property)
+                    if (property.name.name == "list" || property.name.name == "data")
+                        && matches!(&property.value, Expr::Identifier(_)) =>
+                {
+                    match &property.value {
+                        Expr::Identifier(identifier) => Some(state_key(scope.as_deref(), &identifier.name)),
+                        _ => None,
                     }
                 }
-            }
+                _ => None,
+            }).unwrap_or_default();
             Widget::MessagesList { source, style: ws }
         }
-        _ => {
-            let children = el
-                .children
+        _ => Widget::Container(
+            el.children
                 .as_ref()
-                .map(|c| build_widgets_in_context(c, state, ctx))
-                .unwrap_or_default();
-            Widget::Container(children)
-        }
+                .map(|children| build_widgets_in_context(children, state, ctx))
+                .unwrap_or_default(),
+        ),
     }
 }
 
-/// Final style of an element: merges the style block with inline properties, then resolves theme tokens.
-fn build_element_style(el: &ElementExpr, theme: &ResolvedTheme) -> WidgetStyle {
-    let mut ws = WidgetStyle::new();
-
+fn build_element_style(
+    el: &ElementExpr,
+    themes: &Themes,
+    theme: &ResolvedTheme,
+    module: Option<&str>,
+    scope: Option<&str>,
+    state: &UiState,
+) -> WidgetStyle {
+    let mut style = WidgetStyle::new();
     for (name, value) in &el.style.properties {
-        if let Some(resolved) = resolve_style_value(value, theme) {
-            ws.properties.insert(name.clone(), resolved);
+        if let Some(value) = resolve_style_value(value, themes, theme, module) {
+            style.properties.insert(name.clone(), value);
         }
     }
-
-    // Inline properties take priority over the style block.
-    for m in &el.modifiers {
-        if let ElementModifier::Property(p) = m {
-            if let Some(value) = expr_to_style_value(&p.value, theme) {
-                ws.properties.insert(p.name.name.clone(), value);
+    for modifier in &el.modifiers {
+        if let ElementModifier::Property(property) = modifier {
+            if let Some(value) = expr_to_style_value(
+                &property.value,
+                themes,
+                theme,
+                module,
+                scope,
+                state,
+            ) {
+                style.properties.insert(property.name.name.clone(), value);
             }
         }
     }
-
-    ws
+    style
 }
 
-/// Replaces a theme reference with its real value.
-/// Non-theme values are returned unchanged.
-/// An unresolved theme reference yields `None` (the property is dropped).
-fn resolve_style_value(value: &StyleValue, theme: &ResolvedTheme) -> Option<StyleValue> {
+fn resolve_style_value(
+    value: &StyleValue,
+    themes: &Themes,
+    active_theme: &ResolvedTheme,
+    module: Option<&str>,
+) -> Option<StyleValue> {
     match value {
-        StyleValue::Ident(path) => match path.strip_prefix("theme.") {
-            Some(key) => theme.get(key).cloned(),
-            None => Some(value.clone()),
-        },
+        StyleValue::Ident(path) if path.starts_with("theme.") => {
+            let key = path.strip_prefix("theme.")?;
+            if let Some(value) = active_theme.get(key) {
+                return Some(value.clone());
+            }
+            resolve_named_theme_token(key, themes, module)
+        }
         other => Some(other.clone()),
     }
 }
 
-/// Converts an inline property into a style value, resolving theme references.
-fn expr_to_style_value(expr: &Expr, theme: &ResolvedTheme) -> Option<StyleValue> {
+fn resolve_named_theme_token(
+    key: &str,
+    themes: &Themes,
+    module: Option<&str>,
+) -> Option<StyleValue> {
+    let mut candidates: Vec<(String, String)> = themes
+        .named
+        .keys()
+        .filter_map(|theme_name| {
+            let relative = module.and_then(|module| {
+                let private_prefix = format!("{}::", module);
+                let public_prefix = format!("{}.", module);
+                if let Some(relative) = theme_name.strip_prefix(&private_prefix) {
+                    Some(relative.to_string())
+                } else {
+                    theme_name.strip_prefix(&public_prefix).map(str::to_string)
+                }
+            });
+            let relative = relative.unwrap_or_else(|| theme_name.clone());
+            (key == relative || key.starts_with(&format!("{}.", relative)))
+                .then(|| (relative, theme_name.clone()))
+        })
+        .collect();
+    candidates.sort_by_key(|(relative, _)| std::cmp::Reverse(relative.len()));
+    candidates.into_iter().find_map(|(relative, theme_name)| {
+        let token_key = key.strip_prefix(&format!("{}.", relative))?;
+        themes
+            .get(&theme_name)
+            .and_then(|theme| theme.get(token_key).cloned())
+    })
+}
+
+fn expr_to_style_value(
+    expr: &Expr,
+    themes: &Themes,
+    theme: &ResolvedTheme,
+    module: Option<&str>,
+    scope: Option<&str>,
+    state: &UiState,
+) -> Option<StyleValue> {
     match expr {
-        Expr::Literal(lit) => match &lit.value {
-            aec_ast::Literal::String(s) => Some(StyleValue::String(s.clone())),
-            aec_ast::Literal::Int(n) => Some(StyleValue::Int(*n)),
-            aec_ast::Literal::Float(f) => Some(StyleValue::Float(*f)),
-            aec_ast::Literal::Bool(b) => Some(StyleValue::Bool(*b)),
+        Expr::Literal(literal) => match &literal.value {
+            aec_ast::Literal::String(value) | aec_ast::Literal::RawString(value) => {
+                Some(StyleValue::String(value.clone()))
+            }
+            aec_ast::Literal::Int(value) => Some(StyleValue::Int(*value)),
+            aec_ast::Literal::Float(value) => Some(StyleValue::Float(*value)),
+            aec_ast::Literal::Bool(value) => Some(StyleValue::Bool(*value)),
             _ => None,
         },
-        Expr::Identifier(id) => Some(StyleValue::Ident(id.name.clone())),
+        Expr::Identifier(_) => ui_value_to_style(expr_to_value(expr, state, scope)),
         Expr::Member(_) => {
             let path = expr_token_path(expr)?;
-            match path.strip_prefix("theme.") {
-                Some(key) => theme.get(key).cloned(),
-                None => Some(StyleValue::Ident(path)),
-            }
+            resolve_style_value(&StyleValue::Ident(path), themes, theme, module)
+                .or_else(|| ui_value_to_style(expr_to_value(expr, state, scope)))
         }
         _ => None,
     }
 }
 
-/// Builds the path of a chained expr such as `theme.color.primary`.
 fn expr_token_path(expr: &Expr) -> Option<String> {
     match expr {
-        Expr::Identifier(id) => Some(id.name.clone()),
-        Expr::Member(m) => {
-            let base = expr_token_path(&m.object)?;
-            Some(format!("{}.{}", base, m.property.name))
-        }
+        Expr::Identifier(identifier) => Some(identifier.name.clone()),
+        Expr::Member(member) => Some(format!(
+            "{}.{}",
+            expr_token_path(&member.object)?,
+            member.property.name
+        )),
         _ => None,
     }
 }
 
-/// Text defaults taken from the active theme (color.text / text.size / text.weight).
-fn apply_text_defaults(mut ws: WidgetStyle, theme: &ResolvedTheme) -> WidgetStyle {
-    let defaults = [
-        ("color", "color.text"),
-        ("size", "text.size"),
-        ("weight", "text.weight"),
-    ];
-    for (prop, token) in defaults {
-        if !ws.properties.contains_key(prop) {
+fn apply_text_defaults(mut style: WidgetStyle, theme: &ResolvedTheme) -> WidgetStyle {
+    for (property, token) in [("color", "color.text"), ("size", "text.size"), ("weight", "text.weight")] {
+        if !style.properties.contains_key(property) {
             if let Some(value) = theme.get(token) {
-                ws.properties.insert(prop.to_string(), value.clone());
+                style.properties.insert(property.to_string(), value.clone());
             }
         }
     }
-    ws
+    style
 }
 
-/// Card surface default taken from the active theme (color.surface).
-fn apply_surface_default(mut ws: WidgetStyle, theme: &ResolvedTheme) -> WidgetStyle {
-    if !ws.properties.contains_key("background") {
+fn apply_surface_default(mut style: WidgetStyle, theme: &ResolvedTheme) -> WidgetStyle {
+    if !style.properties.contains_key("background") {
         if let Some(value) = theme.get("color.surface") {
-            ws.properties
-                .insert("background".to_string(), value.clone());
+            style.properties.insert("background".to_string(), value.clone());
         }
     }
-    ws
-}
-
-fn eval_text_expr(expr: &Expr, state: &UiState) -> String {
-    match expr {
-        Expr::Literal(lit) => match &lit.value {
-            aec_ast::Literal::String(s) => s.clone(),
-            aec_ast::Literal::Int(n) => n.to_string(),
-            aec_ast::Literal::Interpolated(parts) => eval_interpolated(parts, state),
-            _ => String::new(),
-        },
-        Expr::Identifier(id) => state.get_string(&id.name),
-        Expr::Binary(b) => {
-            use aec_ast::BinaryOp;
-            if matches!(b.op, BinaryOp::Add) {
-                format!(
-                    "{}{}",
-                    eval_text_expr(&b.left, state),
-                    eval_text_expr(&b.right, state)
-                )
-            } else {
-                String::new()
-            }
-        }
-        _ => String::new(),
-    }
-}
-
-fn expr_to_string(expr: &Expr, state: &UiState) -> Option<String> {
-    match expr {
-        Expr::Literal(lit) => match &lit.value {
-            aec_ast::Literal::String(s) => Some(s.clone()),
-            aec_ast::Literal::Int(n) => Some(n.to_string()),
-            aec_ast::Literal::Float(f) => Some(f.to_string()),
-            aec_ast::Literal::Bool(b) => Some(b.to_string()),
-            aec_ast::Literal::Interpolated(parts) => Some(eval_interpolated(parts, state)),
-            _ => None,
-        },
-        Expr::Identifier(id) => Some(id.name.clone()),
-        _ => None,
-    }
-}
-
-fn expr_to_value(expr: &Expr, state: &UiState) -> UiValue {
-    match expr {
-        Expr::Literal(lit) => match &lit.value {
-            aec_ast::Literal::String(s) => UiValue::String(s.clone()),
-            aec_ast::Literal::Int(n) => UiValue::Int(*n),
-            aec_ast::Literal::Float(f) => UiValue::Float(*f),
-            aec_ast::Literal::Bool(b) => UiValue::Bool(*b),
-            aec_ast::Literal::Interpolated(parts) => {
-                UiValue::String(eval_interpolated(parts, state))
-            }
-            _ => UiValue::String(String::new()),
-        },
-        Expr::Identifier(id) => state
-            .get_value(&id.name)
-            .cloned()
-            .unwrap_or(UiValue::String(String::new())),
-        Expr::Array(arr) => UiValue::Array(
-            arr.elements
-                .iter()
-                .map(|element| expr_to_value(element, state))
-                .collect(),
-        ),
-        Expr::Object(obj) => {
-            let mut map = HashMap::new();
-            for field in &obj.fields {
-                map.insert(field.key.name.clone(), expr_to_value(&field.value, state));
-            }
-            UiValue::Object(map)
-        }
-        _ => UiValue::String(String::new()),
-    }
-}
-
-fn extract_fn_name(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::Identifier(id) => Some(id.name.clone()),
-        Expr::Call(call) => {
-            if let Expr::Identifier(id) = &call.callee {
-                Some(id.name.clone())
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
+    style
 }
 
 #[cfg(test)]
@@ -880,6 +1255,7 @@ mod tests {
         (
             name.to_string(),
             ComponentDecl {
+                is_public: true,
                 name: id(name),
                 props: props
                     .iter()
@@ -1174,6 +1550,7 @@ mod tests {
         groups: Vec<(&str, Vec<(&str, StyleValue)>)>,
     ) -> ThemeDecl {
         ThemeDecl {
+            is_public: true,
             name: id(name),
             is_default,
             extends: extends.map(id),
@@ -1265,6 +1642,33 @@ mod tests {
         let mut state = UiState::new();
         let widgets = build_widgets_with_themes(&stmts, &mut state, &components, &themes);
 
+        assert_eq!(
+            style_of(&widgets[0]).get_string("color").as_deref(),
+            Some("#89b4fa")
+        );
+    }
+
+    #[test]
+    fn resolves_qualified_module_theme_token() {
+        let theme = theme_decl(
+            "Dark",
+            false,
+            None,
+            vec![("color", vec![("primary", string_token("#89b4fa"))])],
+        );
+        let items = vec![TopLevelItem::Theme(theme)];
+        let modules = vec![Some("lib".to_string())];
+        let themes = Themes::from_items_with_modules(&items, &modules);
+        let components = ComponentRegistry::new();
+        let stmts = vec![element_with_style(
+            "Text",
+            vec![(
+                "color",
+                StyleValue::Ident("theme.lib.Dark.color.primary".to_string()),
+            )],
+        )];
+        let mut state = UiState::new();
+        let widgets = build_widgets_with_themes(&stmts, &mut state, &components, &themes);
         assert_eq!(
             style_of(&widgets[0]).get_string("color").as_deref(),
             Some("#89b4fa")
@@ -1473,5 +1877,41 @@ mod tests {
         // It must simply terminate, without a stack overflow.
         assert!(themes.get("A").is_some());
         assert!(themes.get("B").is_some());
+    }
+
+    #[test]
+    fn rebuilding_updates_text_conditions_and_call_iterables() {
+        let source = r#"agent Test
+ui Main = Screen "Test" {
+    @count: int = 1
+    Text "count={count}"
+    if count > 0 {
+        Text "positive"
+    }
+    for item in range(3) {
+        Text "item={item}"
+    }
+}
+"#;
+        let program = aec_parser::parse(source).unwrap();
+        let ui = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                TopLevelItem::Ui(ui) => Some(ui.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let mut state = UiState::new();
+        let first = build_widgets(&ui.screen.body, &mut state);
+        let mut first_texts = Vec::new();
+        collect_texts(&first, &mut first_texts);
+        assert_eq!(first_texts, vec!["count=1", "positive", "item=0", "item=1", "item=2"]);
+
+        state.values.insert("count".to_string(), UiValue::Int(0));
+        let second = build_widgets(&ui.screen.body, &mut state);
+        let mut second_texts = Vec::new();
+        collect_texts(&second, &mut second_texts);
+        assert_eq!(second_texts, vec!["count=0", "item=0", "item=1", "item=2"]);
     }
 }

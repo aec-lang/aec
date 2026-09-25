@@ -2,6 +2,7 @@ use crate::errors::build_error;
 use crate::Rule;
 use aec_ast::{
     AgentHeader, Argument, ArrayExpr, AssignOp, AssignStmt, AwaitExpr, BinaryExpr, BinaryOp, Block,
+    CapabilitiesBlock,
     CallExpr, ComponentDecl, ComponentProp, ComponentUse, ElseBranch, Expr, FilesystemRule,
     ForStmt, FunctionDecl, Identifier, IfStmt, ImportStmt, IndexExpr, InterpPart, LambdaExpr, LValue,
     LValueStep, LetStmt,
@@ -10,7 +11,7 @@ use aec_ast::{
     ParenExpr, ParseError, Pattern, PermissionsBlock, PermissionsEntry, Position, Program,
     RetryBlock, RetryField, ReturnStmt, SecretValue, SecretsBlock, SecretsEntry, Span,
     Statement as AstStatement, Style, StyleValue, SystemRule, ThemeDecl, ThemeEntry, ThemeGroup,
-    TopLevelItem, TryExpr, TypeExpr, UnaryExpr, UnaryOp, WhileStmt,
+    TopLevelItem, TryExpr, TypeAliasDecl, TypeExpr, UnaryExpr, UnaryOp, WhileStmt,
 };
 use pest::iterators::Pair;
 
@@ -49,6 +50,9 @@ pub fn build_program(pair: Pair<Rule>) -> Result<Program, ParseError> {
             Rule::model_decl => {
                 items.push(TopLevelItem::Model(build_model_decl(item_pair)?));
             }
+            Rule::type_alias => {
+                items.push(TopLevelItem::TypeAlias(build_type_alias(item_pair)?));
+            }
             Rule::import_stmt => {
                 items.push(TopLevelItem::Import(build_import_stmt(item_pair)?));
             }
@@ -69,9 +73,12 @@ pub fn build_program(pair: Pair<Rule>) -> Result<Program, ParseError> {
         }
     }
 
+    let item_modules = vec![None; items.len()];
     Ok(Program {
         header,
         items,
+        imports: Vec::new(),
+        item_modules,
         span,
     })
 }
@@ -89,6 +96,16 @@ fn build_agent_header(pair: Pair<Rule>) -> Result<AgentHeader, ParseError> {
 fn build_identifier(pair: Pair<Rule>) -> Result<Identifier, ParseError> {
     let span = pair_span(&pair);
     Ok(Identifier::new(pair.as_str(), span))
+}
+
+fn take_visibility<'a>(
+    inner: &mut pest::iterators::Pairs<'a, Rule>,
+) -> (bool, Option<Pair<'a, Rule>>) {
+    match inner.next() {
+        Some(pair) if pair.as_rule() == Rule::visibility => (true, inner.next()),
+        Some(pair) => (false, Some(pair)),
+        None => (false, None),
+    }
 }
 
 fn build_import_stmt(pair: Pair<Rule>) -> Result<ImportStmt, ParseError> {
@@ -313,9 +330,8 @@ fn build_limits_block(pair: Pair<Rule>) -> Result<LimitsBlock, ParseError> {
 fn build_model_decl(pair: Pair<Rule>) -> Result<ModelDecl, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-    let name_pair = inner
-        .next()
-        .ok_or_else(|| build_error(span, "model needs a name"))?;
+    let (is_public, name_pair) = take_visibility(&mut inner);
+    let name_pair = name_pair.ok_or_else(|| build_error(span, "model needs a name"))?;
     let name = build_identifier(name_pair)?;
 
     let mut fields = Vec::new();
@@ -327,10 +343,13 @@ fn build_model_decl(pair: Pair<Rule>) -> Result<ModelDecl, ParseError> {
             Rule::retry_block => {
                 fields.push(ModelField::Retry(build_retry_block(field_pair)?));
             }
+            Rule::capabilities_block => {
+                fields.push(ModelField::Capabilities(build_capabilities_block(field_pair)?));
+            }
             _ => {}
         }
     }
-    Ok(ModelDecl { name, fields, span })
+    Ok(ModelDecl { is_public, name, fields, span })
 }
 
 fn build_model_property(pair: Pair<Rule>) -> Result<ModelProperty, ParseError> {
@@ -355,10 +374,32 @@ fn build_retry_block(pair: Pair<Rule>) -> Result<RetryBlock, ParseError> {
             Rule::retry_property => {
                 fields.push(RetryField::Property(build_model_property(field_pair)?));
             }
+            Rule::retry_on => {
+                let mut values = Vec::new();
+                for element in field_pair.into_inner() {
+                    if element.as_rule() == Rule::array_literal {
+                        for value in element.into_inner() {
+                            values.push(build_literal(value)?);
+                        }
+                    }
+                }
+                fields.push(RetryField::On(values));
+            }
             _ => {}
         }
     }
     Ok(RetryBlock { fields, span })
+}
+
+fn build_capabilities_block(pair: Pair<Rule>) -> Result<CapabilitiesBlock, ParseError> {
+    let span = pair_span(&pair);
+    let mut entries = Vec::new();
+    for entry in pair.into_inner() {
+        if entry.as_rule() == Rule::model_property {
+            entries.push(build_model_property(entry)?);
+        }
+    }
+    Ok(CapabilitiesBlock { entries, span })
 }
 
 fn build_literal(pair: Pair<Rule>) -> Result<Literal, ParseError> {
@@ -420,7 +461,9 @@ fn build_literal(pair: Pair<Rule>) -> Result<Literal, ParseError> {
                 "GB" => 1024 * 1024 * 1024,
                 other => return Err(build_error(span, format!("unknown unit: {}", other))),
             };
-            Ok(Literal::ByteSize(value * multiplier))
+            Ok(Literal::ByteSize(value.checked_mul(multiplier).ok_or_else(|| {
+                build_error(span, "byte size literal is too large")
+            })?))
         }
         Rule::uuid_literal => {
             let uuid = uuid::Uuid::parse_str(pair.as_str())
@@ -869,13 +912,29 @@ fn build_pattern(pair: Pair<Rule>) -> Result<Pattern, ParseError> {
 // Functions
 // ============================================================
 
+fn build_type_alias(pair: Pair<Rule>) -> Result<TypeAliasDecl, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+    let (is_public, name_pair) = take_visibility(&mut inner);
+    let name_pair = name_pair.ok_or_else(|| build_error(span, "type alias needs a name"))?;
+    let name = build_identifier(name_pair)?;
+    let target_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "type alias needs a target type"))?;
+    let target = build_full_type(target_pair)?;
+    Ok(TypeAliasDecl {
+        is_public,
+        name,
+        target,
+        span,
+    })
+}
+
 fn build_function_decl(pair: Pair<Rule>) -> Result<FunctionDecl, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-
-    let name_pair = inner
-        .next()
-        .ok_or_else(|| build_error(span, "fn needs a name"))?;
+    let (is_public, name_pair) = take_visibility(&mut inner);
+    let name_pair = name_pair.ok_or_else(|| build_error(span, "fn needs a name"))?;
     let name = build_identifier(name_pair)?;
 
     let mut params = Vec::new();
@@ -903,6 +962,7 @@ fn build_function_decl(pair: Pair<Rule>) -> Result<FunctionDecl, ParseError> {
     let body = body.ok_or_else(|| build_error(span, "fn needs a body"))?;
 
     Ok(FunctionDecl {
+        is_public,
         name,
         params,
         return_type,
@@ -1206,10 +1266,8 @@ use aec_ast::{
 pub fn build_ui_decl(pair: Pair<Rule>) -> Result<UiDecl, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-
-    let name_pair = inner
-        .next()
-        .ok_or_else(|| build_error(span, "ui needs a name"))?;
+    let (is_public, name_pair) = take_visibility(&mut inner);
+    let name_pair = name_pair.ok_or_else(|| build_error(span, "ui needs a name"))?;
     let name = build_identifier(name_pair)?;
 
     let screen_pair = inner
@@ -1217,16 +1275,14 @@ pub fn build_ui_decl(pair: Pair<Rule>) -> Result<UiDecl, ParseError> {
         .ok_or_else(|| build_error(span, "ui needs a Screen"))?;
     let screen = build_screen(screen_pair)?;
 
-    Ok(UiDecl { name, screen, span })
+    Ok(UiDecl { is_public, name, screen, span })
 }
 
 fn build_component_decl(pair: Pair<Rule>) -> Result<ComponentDecl, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-
-    let name_pair = inner
-        .next()
-        .ok_or_else(|| build_error(span, "component needs a name"))?;
+    let (is_public, name_pair) = take_visibility(&mut inner);
+    let name_pair = name_pair.ok_or_else(|| build_error(span, "component needs a name"))?;
     let name = build_identifier(name_pair)?;
 
     let mut props = Vec::new();
@@ -1240,6 +1296,7 @@ fn build_component_decl(pair: Pair<Rule>) -> Result<ComponentDecl, ParseError> {
     }
 
     Ok(ComponentDecl {
+        is_public,
         name,
         props,
         render,
@@ -1295,10 +1352,8 @@ fn build_component_use(pair: Pair<Rule>) -> Result<ComponentUse, ParseError> {
 fn build_theme_decl(pair: Pair<Rule>) -> Result<ThemeDecl, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-
-    let name_pair = inner
-        .next()
-        .ok_or_else(|| build_error(span, "theme needs a name"))?;
+    let (is_public, name_pair) = take_visibility(&mut inner);
+    let name_pair = name_pair.ok_or_else(|| build_error(span, "theme needs a name"))?;
     let name = build_identifier(name_pair)?;
 
     let mut is_default = false;
@@ -1321,6 +1376,7 @@ fn build_theme_decl(pair: Pair<Rule>) -> Result<ThemeDecl, ParseError> {
     }
 
     Ok(ThemeDecl {
+        is_public,
         name,
         is_default,
         extends,

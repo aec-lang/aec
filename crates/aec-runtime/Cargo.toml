@@ -7,7 +7,7 @@ authors.workspace = true
 description = "Runtime / Interpreter for AEC"
 
 [dependencies]
-aec-ast = { path = "../aec-ast" }
+aec-ast = { version = "0.1.0", path = "../aec-ast" }
 thiserror.workspace = true
 uuid.workspace = true
 reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false }
@@ -19,4 +19,4 @@ base64 = "0.22"
 rusqlite.workspace = true
 
 [dev-dependencies]
-aec-parser = { path = "../aec-parser" }
+aec-parser = { version = "0.1.0", path = "../aec-parser" }

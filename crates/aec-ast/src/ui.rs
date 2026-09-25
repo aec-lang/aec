@@ -9,6 +9,7 @@ use crate::style::Style;
 /// ui Main = Screen "Title" { ... }
 #[derive(Debug, Clone)]
 pub struct UiDecl {
+    pub is_public: bool,
     pub name: Identifier,
     pub screen: ScreenExpr,
     pub span: Span,
@@ -46,6 +47,7 @@ pub enum UiStatement {
 /// component Name { prop x: Type render { ... } }
 #[derive(Debug, Clone)]
 pub struct ComponentDecl {
+    pub is_public: bool,
     pub name: Identifier,
     pub props: Vec<ComponentProp>,
     pub render: Option<Vec<UiStatement>>,

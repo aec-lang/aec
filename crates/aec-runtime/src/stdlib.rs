@@ -7,13 +7,84 @@ use std::collections::HashMap;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
+pub fn builtin_arity(name: &str) -> Option<(usize, Option<usize>)> {
+    let arity = match name {
+        "file.read" | "file_read" | "file.exists" | "file_exists" | "file.delete"
+        | "file_delete" | "env.get" | "env_get" => (1, Some(1)),
+        "file.write" | "file_write" | "file.append" | "file_append" | "env.set"
+        | "env_set" | "http.post" | "http_post" | "http.put" | "http_put" => (2, Some(2)),
+        "http.get" | "http_get" | "http.delete" | "http_delete" | "json.parse"
+        | "json_parse" | "json.stringify" | "json_stringify" | "time.sleep"
+        | "time_sleep" | "sleep" => (1, Some(1)),
+        "time.now_ms" | "time_now_ms" | "now_ms" | "time.now_sec" | "time_now_sec"
+        | "now" | "sys.args" | "sys_args" | "args" => (0, Some(0)),
+        "sys.exit" | "sys_exit" | "exit" => (0, Some(1)),
+        "math.pi" | "math_pi" | "pi" | "math.e" | "math_e" | "e" | "math.tau"
+        | "math_tau" | "math.random" | "math_random" | "random" | "sys.info"
+        | "sys_info" | "sys.env_all" | "sys_env_all" | "uuid.v4" | "uuid_v4"
+        | "uuid" => (0, Some(0)),
+        "math.sin" | "math_sin" | "sin" | "math.cos" | "math_cos" | "cos"
+        | "math.tan" | "math_tan" | "tan" | "math.log" | "math_log" | "log"
+        | "math.log10" | "log10" | "math.exp" | "math_exp" | "exp" | "math.floor"
+        | "math_floor" | "floor" | "math.ceil" | "math_ceil" | "ceil"
+        | "math.round" | "math_round" | "round" | "sort" | "reverse" | "first"
+        | "last" | "upper" | "lower" | "trim" | "str" | "int" | "float" | "bool" | "len"
+        | "abs" | "sqrt" | "keys" | "values" | "pop" | "shell.run" | "shell_run"
+        | "crypto.md5" | "crypto_md5" | "md5"
+        | "crypto.sha256" | "crypto_sha256" | "sha256" | "crypto.sha512"
+        | "crypto_sha512" | "sha512" | "crypto.base64_encode" | "base64_encode"
+        | "b64_encode" | "crypto.base64_decode" | "base64_decode" | "b64_decode"
+        |         "file.list_dir" | "file_list_dir" | "ls" | "file.mkdir" | "file_mkdir"
+        | "file.size" | "file_size" => (1, Some(1)),
+        "file.copy" | "file_copy" => (2, Some(2)),
+
+        "math.random_int" | "random_int" => (2, Some(2)),
+        "slice" => (2, Some(3)),
+        "starts_with" | "ends_with" | "join" | "contains" | "push" | "min"
+        | "max" | "pow" | "has" | "repeat" | "char_at" | "regex.match" | "regex_match"
+        | "regex.find" | "regex_find" | "regex.find_all" | "regex_find_all" => (2, Some(2)),
+        "replace" | "regex.replace" | "regex_replace" => (3, Some(3)),
+        "range" => (1, Some(2)),
+        "map" | "filter" => (2, Some(2)),
+        "reduce" => (3, Some(3)),
+        "ok" | "err" | "is_ok" | "is_err" | "llm.complete" | "llm_complete"
+        | "memory.open" | "memory_open" | "memory.get" | "memory_get"
+        | "memory.clear" | "memory_clear" | "memory.count" | "memory_count" => (1, Some(1)),
+        "read_line" | "print" => (0, None),
+        "memory.add" | "memory_add" => (3, Some(3)),
+        "push_to" => (2, Some(2)),
+        _ => return None,
+    };
+    Some(arity)
+}
+
+pub fn validate_builtin_args(
+    name: &str,
+    args: &[Value],
+    span: Span,
+) -> Result<(), RuntimeError> {
+    let Some((min, max)) = builtin_arity(name) else {
+        return Ok(());
+    };
+    if args.len() < min || max.is_some_and(|max| args.len() > max) {
+        return Err(RuntimeError::WrongArgCount {
+            expected: min,
+            got: args.len(),
+            span,
+        });
+    }
+    Ok(())
+}
+
 /// Run a built-in
 pub fn call_builtin(
     name: &str,
     args: &[Value],
     span: Span,
     limits: &crate::permissions::Limits,
+    restricted: bool,
 ) -> Result<Option<Value>, RuntimeError> {
+    validate_builtin_args(name, args, span)?;
     let result: Value = match name {
         // ---------- File I/O ----------
         "file.read" | "file_read" => {
@@ -179,6 +250,7 @@ pub fn call_builtin(
             };
             let client = reqwest::blocking::Client::builder()
                 .timeout(limits.http_timeout())
+                .redirect(if restricted { reqwest::redirect::Policy::none() } else { reqwest::redirect::Policy::default() })
                 .build()
                 .map_err(|e| RuntimeError::Generic {
                     message: format!("failed to build client: {}", e),
@@ -219,6 +291,7 @@ pub fn call_builtin(
             };
             let client = reqwest::blocking::Client::builder()
                 .timeout(limits.http_timeout())
+                .redirect(if restricted { reqwest::redirect::Policy::none() } else { reqwest::redirect::Policy::default() })
                 .build()
                 .map_err(|e| RuntimeError::Generic {
                     message: format!("failed to build client: {}", e),
@@ -295,7 +368,11 @@ pub fn call_builtin(
                 return Err(RuntimeError::WrongArgCount { expected: 1, got: args.len(), span });
             }
             let ms = match &args[0] {
-                Value::Int(n) => *n as u64,
+                Value::Int(n) if *n >= 0 => *n as u64,
+                Value::Int(_) => return Err(RuntimeError::Generic {
+                    message: "time.sleep duration must be non-negative".to_string(),
+                    span,
+                }),
                 _ => return Err(RuntimeError::TypeError {
                     message: "time.sleep needs int (milliseconds)".to_string(),
                     span,
@@ -393,6 +470,7 @@ fn value_to_json(value: &Value) -> serde_json::Value {
 // ============================================================
 
 pub fn call_builtin2(name: &str, args: &[Value], span: Span) -> Result<Option<Value>, RuntimeError> {
+    validate_builtin_args(name, args, span)?;
     let result = match name {
         // ---------- Math ----------
         "math.pi" | "math_pi" | "pi" => Value::Float(std::f64::consts::PI),
@@ -463,15 +541,24 @@ pub fn call_builtin2(name: &str, args: &[Value], span: Span) -> Result<Option<Va
                     span,
                 }),
             };
+            if min > max {
+                return Err(RuntimeError::Generic {
+                    message: "random_int() requires min <= max".to_string(),
+                    span,
+                });
+            }
             use std::time::{SystemTime, UNIX_EPOCH};
             let seed = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_nanos() as u64)
                 .unwrap_or(42);
-            let r = (seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)) >> 33;
-            let range = (max - min).abs() as u64 + 1;
-            let val = min + ((r % range) as i64);
-            Value::Int(val)
+            let range = (max as i128 - min as i128 + 1) as u128;
+            let value = min as i128 + (seed as i128 % range as i128);
+            let value = i64::try_from(value).map_err(|_| RuntimeError::Generic {
+                message: "random_int() result is out of range".to_string(),
+                span,
+            })?;
+            Value::Int(value)
         }
 
         // ---------- Collections ----------
@@ -482,7 +569,7 @@ pub fn call_builtin2(name: &str, args: &[Value], span: Span) -> Result<Option<Va
             match &args[0] {
                 Value::Array(arr) => {
                     let mut sorted = arr.clone();
-                    sorted.sort_by(|a, b| compare_values(a, b));
+                    sorted.sort_by(compare_values);
                     Value::Array(sorted)
                 }
                 v => return Err(RuntimeError::TypeError {
@@ -535,13 +622,27 @@ pub fn call_builtin2(name: &str, args: &[Value], span: Span) -> Result<Option<Va
                 return Err(RuntimeError::WrongArgCount { expected: 2, got: args.len(), span });
             }
             let start = match &args[1] {
-                Value::Int(n) => *n as usize,
-                _ => 0,
+                Value::Int(n) if *n >= 0 => *n as usize,
+                Value::Int(_) => return Err(RuntimeError::Generic {
+                    message: "slice() start must be non-negative".to_string(),
+                    span,
+                }),
+                _ => return Err(RuntimeError::TypeError {
+                    message: "slice() indices must be ints".to_string(),
+                    span,
+                }),
             };
             let end = if args.len() >= 3 {
                 match &args[2] {
-                    Value::Int(n) => *n as usize,
-                    _ => usize::MAX,
+                    Value::Int(n) if *n >= 0 => *n as usize,
+                    Value::Int(_) => return Err(RuntimeError::Generic {
+                        message: "slice() end must be non-negative".to_string(),
+                        span,
+                    }),
+                    _ => return Err(RuntimeError::TypeError {
+                        message: "slice() indices must be ints".to_string(),
+                        span,
+                    }),
                 }
             } else {
                 usize::MAX
@@ -581,7 +682,23 @@ pub fn call_builtin2(name: &str, args: &[Value], span: Span) -> Result<Option<Va
             }),
         },
         "repeat" => match (&args[0], &args[1]) {
-            (Value::String(s), Value::Int(n)) => Value::String(s.repeat(*n as usize)),
+            (Value::String(s), Value::Int(n)) if *n >= 0 => {
+                let length = usize::try_from(*n).map_err(|_| RuntimeError::Generic {
+                    message: "repeat() count is too large".to_string(),
+                    span,
+                })?;
+                if length.saturating_mul(s.chars().count()) > 10_000_000 {
+                    return Err(RuntimeError::Generic {
+                        message: "repeat() result is too large".to_string(),
+                        span,
+                    });
+                }
+                Value::String(s.repeat(length))
+            }
+            (Value::String(_), Value::Int(_)) => return Err(RuntimeError::Generic {
+                message: "repeat() count must be non-negative".to_string(),
+                span,
+            }),
             _ => return Err(RuntimeError::TypeError {
                 message: "repeat needs string and int".to_string(),
                 span,

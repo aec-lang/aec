@@ -7,7 +7,7 @@ authors.workspace = true
 description = "Parser for the AEC language"
 
 [dependencies]
-aec-ast = { path = "../aec-ast" }
+aec-ast = { version = "0.1.0", path = "../aec-ast" }
 pest.workspace = true
 pest_derive.workspace = true
 thiserror.workspace = true

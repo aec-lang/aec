@@ -1,5 +1,5 @@
 use crate::declarative::SecretsBlock;
-use crate::function::FunctionDecl;
+use crate::function::{FunctionDecl, TypeAliasDecl};
 use crate::model::ModelDecl;
 use crate::permissions::{LimitsBlock, PermissionsBlock};
 use crate::span::Span;
@@ -10,7 +10,16 @@ use crate::ui::{ComponentDecl, UiDecl};
 pub struct Program {
     pub header: AgentHeader,
     pub items: Vec<TopLevelItem>,
+    pub imports: Vec<ResolvedImport>,
+    pub item_modules: Vec<Option<String>>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedImport {
+    pub alias: Option<String>,
+    pub path: String,
+    pub exports: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +49,7 @@ pub enum TopLevelItem {
     Permissions(PermissionsBlock),
     Limits(LimitsBlock),
     Model(ModelDecl),
+    TypeAlias(TypeAliasDecl),
     Import(ImportStmt),
     Function(FunctionDecl),
     Component(ComponentDecl),

@@ -129,3 +129,27 @@ fn fails_without_agent_header() {
     let result = parse(source);
     assert!(result.is_err(), "should fail without agent header");
 }
+
+#[test]
+fn parses_public_type_alias() {
+    let source = "agent Test\npub type UserId = string\n";
+    let program = parse(source).expect("should parse");
+    match &program.items[0] {
+        TopLevelItem::TypeAlias(alias) => {
+            assert!(alias.is_public);
+            assert_eq!(alias.name.name, "UserId");
+            assert_eq!(alias.target, aec_ast::TypeExpr::String);
+        }
+        _ => panic!("expected type alias"),
+    }
+}
+
+#[test]
+fn parses_public_declarations() {
+    let source = "agent Test\npub fn answer() -> int { return 42 }\n";
+    let program = parse(source).expect("should parse");
+    match &program.items[0] {
+        TopLevelItem::Function(function) => assert!(function.is_public),
+        _ => panic!("expected function"),
+    }
+}

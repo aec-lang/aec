@@ -10,6 +10,7 @@ use crate::style::StyleValue;
 /// theme Dark { color { ... } text { ... } }
 #[derive(Debug, Clone)]
 pub struct ThemeDecl {
+    pub is_public: bool,
     pub name: Identifier,
     /// Should this theme be applied to the UI by default?
     pub is_default: bool,

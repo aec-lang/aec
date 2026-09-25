@@ -469,3 +469,108 @@ fn double(n: int) -> int {
 "#;
     assert_eq!(as_int(call(src, "double", vec![Value::Int(21)])), 42);
 }
+
+#[test]
+fn missing_builtin_arguments_return_errors_without_panicking() {
+    let src = "agent Test\nfn f() -> string { return upper() }\n";
+    let error = try_call(src, "f", vec![]).expect_err("upper() must fail");
+    assert!(matches!(error, RuntimeError::WrongArgCount { .. }));
+}
+
+#[test]
+fn default_and_named_arguments_are_bound() {
+    let src = r#"agent Test
+
+fn greet(name: string = "world", punctuation: string = "!") -> string {
+    return "hello " + name + punctuation
+}
+
+fn f() -> string {
+    return greet(punctuation: "?", name: "AEC")
+}
+"#;
+    assert_eq!(as_string(call(src, "f", vec![])), "hello AEC?");
+    assert_eq!(as_string(call(src, "greet", vec![])), "hello world!");
+}
+
+#[test]
+fn nested_assignment_updates_objects_and_arrays() {
+    let src = r#"agent Test
+
+fn f() -> int {
+    var item = { value: 1 }
+    var values = [0, 1]
+    item.value = 7
+    values[1] = 9
+    return item.value + values[1]
+}
+"#;
+    assert_eq!(as_int(call(src, "f", vec![])), 16);
+}
+
+#[test]
+fn match_patterns_bind_values() {
+    let src = r#"agent Test
+
+fn f(value: int) -> int {
+    return match value {
+        other -> other + 1
+    }
+}
+"#;
+    assert_eq!(as_int(call(src, "f", vec![Value::Int(4)])), 5);
+}
+
+#[test]
+fn user_functions_can_shadow_builtin_names() {
+    let src = r#"agent Test
+
+fn first(values: [int]) -> int {
+    return 99
+}
+
+fn f() -> int {
+    return first([1, 2])
+}
+"#;
+    assert_eq!(as_int(call(src, "f", vec![])), 99);
+}
+
+#[test]
+fn integer_overflow_is_a_runtime_error() {
+    let src = "agent Test\nfn f() -> int { return 9223372036854775807 + 1 }\n";
+    let error = try_call(src, "f", vec![]).expect_err("overflow must fail");
+    assert!(format!("{}", error).contains("overflow"));
+}
+
+#[test]
+fn negative_repeat_is_rejected() {
+    let src = "agent Test\nfn f() -> string { return repeat(\"x\", -1) }\n";
+    let error = try_call(src, "f", vec![]).expect_err("negative repeat must fail");
+    assert!(format!("{}", error).contains("non-negative"));
+}
+
+#[test]
+fn top_level_functions_are_first_class_values() {
+    let src = r#"agent Test
+fn double(value: int) -> int { return value * 2 }
+fn f() -> int {
+    let callable = double
+    return callable(21)
+}
+"#;
+    assert_eq!(as_int(call(src, "f", vec![])), 42);
+}
+
+#[test]
+fn higher_order_collection_helpers_accept_closures() {
+    let src = r#"agent Test
+fn f() -> int {
+    let mapped = map([1, 2, 3], x => x * 2)
+    let filtered = filter(mapped, (x => x > 2))
+    let add = a, b => a + b
+    return reduce(filtered, add, 0)
+}
+"#;
+    assert_eq!(as_int(call(src, "f", vec![])), 10);
+}

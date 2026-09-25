@@ -21,6 +21,10 @@ pub enum DiagKind {
     NotIndexable,
     UndeclaredVariable,
     AssignToImmutable,
+    UnknownFunction,
+    InvalidUi,
+    DuplicateDeclaration,
+    UnsupportedFeature,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

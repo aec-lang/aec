@@ -67,7 +67,7 @@
   .donut svg { transform: rotate(-90deg); }
   .donut .track { fill: none; stroke: #1e2740; stroke-width: 16; }
   .donut .val { fill: none; stroke: url(#g1); stroke-width: 16; stroke-linecap: round;
-                stroke-dasharray: 472 503; animation: dash 1.5s cubic-bezier(.4,0,.2,1) both; }
+                stroke-dasharray: 488 503; animation: dash 1.5s cubic-bezier(.4,0,.2,1) both; }
   @keyframes dash { from { stroke-dasharray: 0 503; } }
   .donut .center { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
   .donut .num { font-size: 44px; font-weight: 700; line-height: 1; }
@@ -144,6 +144,7 @@
   footer { margin-top: 54px; color: var(--faint); font-size: 12.5px; text-align: center; border-top: 1px solid var(--line); padding-top: 22px; }
   .kbd { font-family: ui-monospace, monospace; background: #1c2440; border: 1px solid var(--line);
          border-radius: 7px; padding: 1px 7px; font-size: 12px; color: var(--primary); }
+  a { color: var(--accent); text-underline-offset: 3px; }
 </style>
 </head>
 <body>
@@ -158,7 +159,7 @@
         این گزارش بر اساس دامنهٔ <b>واقعیِ</b> پروژه نوشته شده: AEC یک <b>زبان</b> است
         (سینتکس + Runtime + UI Engine)، نه اکوسیستمی چندساله. سند اولیه به‌عنوان آرمان کنار گذاشته شد.
       </p>
-      <div class="meta">مخزن: <span class="kbd">/home/mamadi/aec</span> · تاریخ: ۲۰۲۶-۰۹-۲۱ · ۸۱ تست سبز</div>
+      <div class="meta">مخزن: <span class="kbd">/home/mamadi/aec</span> · به‌روزرسانی: ۲۰۲۶-۰۹-۲۵ · <b>۲۷۴ تست سبز</b> · تغییرات جدید هنوز کامیت نشده‌اند</div>
     </div>
     <div class="donut">
       <svg width="190" height="190" viewBox="0 0 190 190">
@@ -171,25 +172,59 @@
         <circle class="val" cx="95" cy="95" r="80" />
       </svg>
       <div class="center">
-        <div class="num">۹۸<small>٪</small></div>
-        <div class="lbl">کل زبان</div>
+        <div class="num">۹۷<small>٪</small></div>
+        <div class="lbl">پیشرفت وزنی تخمینی</div>
       </div>
+    </div>
+  </div>
+
+  <div class="callout blue" id="simple-100-checklist">
+    <div class="ic">✓</div>
+    <div>
+      <h2 style="margin:0 0 8px">چک‌لیست سادهٔ رسیدن به ۱۰۰٪</h2>
+      <p style="margin:0 0 8px">عدد فعلی ۹۷٪ است. برای ثبت ۱۰۰٪ واقعی، این چهار تصمیم/آزمایش باید انجام شوند:</p>
+      <ol style="margin:8px 18px 0; padding:0; line-height:1.9">
+        <li>☐ <b>نوع nominal:</b> مشخص کنیم <span class="kbd">struct</span>/<span class="kbd">enum</span> دقیقاً چه رفتاری داشته باشند؛ type alias ساده already پیاده شده است.</li>
+        <li>☐ <b>سه سیستم‌عامل:</b> workflow روی Linux، macOS و Windows اجرا و نتیجهٔ آن ثبت شود.</li>
+        <li>☐ <b>QA بصری:</b> پنجرهٔ native با ورودی، button، state، RTL و theme در سه سیستم‌عامل بررسی شود.</li>
+        <li>☐ <b>انتشار و امنیت:</b> دربارهٔ registry، امضای package و OS sandbox تصمیم نهایی و اجرای واقعی ثبت شود.</li>
+      </ol>
+      <p style="margin:10px 0 0"><b>APM از قبل آماده است:</b> <span class="kbd">apm init</span>، <span class="kbd">add</span>، <span class="kbd">remove</span>، <span class="kbd">install</span>، <span class="kbd">list</span> و <span class="kbd">tree</span> با <span class="kbd">apm.toml</span>/<span class="kbd">apm.lock</span>. راهنما: <a href="apm.md">APM</a>.</p>
     </div>
   </div>
 
   <div class="callout green">
     <div class="ic">✅</div>
     <div>
-      <b>لیست «بحرانی» تمام شد</b> (Component System، Theme System، if/for، Messages، Chatbot)
-      و بعد از آن <b>Type Checker فاز ۱</b> و <b>Better Errors</b> هم اضافه شدند.
-      ضمن کار، یک شکاف واقعی زبان پیدا و رفع شد: عملگرهای <span class="kbd">and</span> / <span class="kbd">or</span>
-      در AST و runtime بودند ولی <b>در grammar نبودند</b> — الان کار می‌کنند.
+      <b>جلسهٔ ۴: «زبان» از نظر فیچر بسته شد.</b> شش آیتم تمام شد —
+      <span class="kbd">var</span> تغییرپذیر، <b>Interpolation</b> رشته،
+      <span class="kbd">Result</span>/<span class="kbd">?</span>، <b>Lambda/Closure</b>،
+      <b>گیت نوع در</b> <span class="kbd">aec run</span>، و Quick Wins.
+      ضمن کار <b>سه باگ از قبل موجود</b> هم پیدا و رفع شد (پایین‌تر توضیح داده شده‌اند).
+      <br />
+      اکنون import چندفایلی، <span class="kbd">pub</span>، alias عمومی و namespace چندلایه در CLI اجرا می‌شود؛
+      component/theme/model/type alias، package workspace و smoke native نیز تست شده‌اند.
+      برای ۱۰۰٪ فقط nominal type، محیط‌های مقصد، registry/signing و sandbox سیستم‌عامل باقی است.
+    </div>
+  </div>
+
+  <div class="callout blue">
+    <div class="ic">🐞</div>
+    <div>
+      <b>سه باگ پنهان که سر راه پیدا شد</b> — هر سه از یک جنس: قابلیتی که در گرامر «بود» ولی عملاً کار نمی‌کرد.
+      <ul style="margin:8px 18px 0 0; padding:0; font-size:13px">
+        <li><span class="kbd">none</span> به‌عنوان <b>مقدار</b> هرگز پارس نمی‌شد (<span class="kbd">let x = none</span> می‌ترکید).</li>
+        <li><span class="kbd">?</span> در <b>نوع</b> بی‌صدا دور ریخته می‌شد؛ <span class="kbd">int?</span> همان <span class="kbd">int</span> می‌شد.</li>
+        <li>لیست builtinهای چکر ناقص بود → هشدار کاذب «متغیر تعریف‌نشده» برای <span class="kbd">upper</span>، <span class="kbd">min</span>، <span class="kbd">ls</span> و…</li>
+      </ul>
+      ریشهٔ مشترک دو مورد اول: یک literal <b>بی‌نام</b> داخل قاعدهٔ silent پارس را موفق می‌کند ولی به سازندهٔ AST <b>هیچ چیزی نمی‌رساند</b>.
+      هر سه با تست نگهبان قفل شدند.
     </div>
   </div>
 
   <!-- WEIGHTED TABLE -->
   <h2><span class="dot"></span>جدول وزنی (دامنهٔ زبان)</h2>
-  <p class="hint">همان وزن‌های خودت؛ ستون «وضعیت» با وضعیت فعلی مخزن به‌روز شد.</p>
+  <p class="hint">وزن‌های اولیه حفظ شده‌اند. درصدهای هر ردیف برآورد دامنه‌اند؛ نتیجهٔ تست و محدودیت‌ها جداگانه ثبت شده است.</p>
 
   <div class="panel">
     <table>
@@ -199,106 +234,123 @@
         <th style="width:37%">وضعیت</th>
         <th style="width:18%">امتیاز</th>
       </tr>
-      <tr><td class="f">زبان (Syntax + Parser + AST)</td><td class="c">۱۵٪</td><td><span class="badge ok">✓ ۱۰۰٪</span></td><td class="c">۱۵٪</td></tr>
-      <tr><td class="f">Runtime (Interpreter)</td><td class="c">۱۵٪</td><td><span class="badge ok">✓ ۱۰۰٪</span></td><td class="c">۱۵٪</td></tr>
-      <tr><td class="f">Built-ins (Stdlib)</td><td class="c">۱۰٪</td><td><span class="badge mid">◐ ۸۵٪</span></td><td class="c">۸.۵٪</td></tr>
+      <tr><td class="f">زبان (Syntax + Parser + AST)</td><td class="c">۱۵٪</td><td><span class="badge mid">◐ ۹۹٪</span> <span class="tag">module namespace و type alias پیاده شده</span></td><td class="c">۱۴.۸۵٪</td></tr>
+      <tr><td class="f">Runtime (Interpreter)</td><td class="c">۱۵٪</td><td><span class="badge ok">✓ ۱۰۰٪</span> <span class="mini"><i style="width:100%;background:#4ade80"></i></span></td><td class="c">۱۵٪</td></tr>
+      <tr><td class="f">Built-ins (Stdlib)</td><td class="c">۱۰٪</td><td><span class="badge mid">◐ ۹۵٪</span> <span class="tag">arity و higher-order اضافه شد</span></td><td class="c">۹.۵٪</td></tr>
       <tr><td class="f">LLM Adapter</td><td class="c">۵٪</td><td><span class="badge ok">✓ ۱۰۰٪</span></td><td class="c">۵٪</td></tr>
       <tr><td class="f">HTTP / JSON / File / Crypto</td><td class="c">۵٪</td><td><span class="badge ok">✓ ۱۰۰٪</span></td><td class="c">۵٪</td></tr>
-      <tr><td class="f">UI DSL</td><td class="c">۱۵٪</td><td><span class="badge ok">✓ ۹۰٪</span></td><td class="c">۱۳.۵٪</td></tr>
+      <tr><td class="f">UI DSL</td><td class="c">۱۵٪</td><td><span class="badge mid">◐ ۹۷٪</span> <span class="tag">rebuild، expression و component/theme namespace</span></td><td class="c">۱۴.۵۵٪</td></tr>
       <tr><td class="f">Style System</td><td class="c">۵٪</td><td><span class="badge ok">✓ ۹۰٪</span></td><td class="c">۴.۵٪</td></tr>
-      <tr><td class="f">Font + RTL</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۹۰٪</span></td><td class="c">۲.۷٪</td></tr>
+      <tr><td class="f">Font + RTL</td><td class="c">۳٪</td><td><span class="badge mid">◐ ۹۵٪</span> <span class="tag">layout راست‌به‌چپ اعمال شد</span></td><td class="c">۲.۸۵٪</td></tr>
       <tr><td class="f">Native Rendering</td><td class="c">۵٪</td><td><span class="badge ok">✓ ۱۰۰٪</span></td><td class="c">۵٪</td></tr>
       <tr><td class="f">Component System</td><td class="c">۵٪</td><td><span class="badge ok">✓ ۱۰۰٪</span></td><td class="c">۵٪</td></tr>
       <tr><td class="f">Theme System</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۱۰۰٪</span></td><td class="c">۳٪</td></tr>
-      <tr><td class="f">State Sync (UI ↔ Runtime)</td><td class="c">۵٪</td><td><span class="badge mid">◐ ۷۵٪</span></td><td class="c">۳.۷۵٪</td></tr>
-      <tr><td class="f">Type Checker</td><td class="c">۵٪</td><td><span class="badge ok">✓ ۹۰٪</span></td><td class="c">۴.۵٪</td></tr>
+      <tr><td class="f">State Sync (UI ↔ Runtime)</td><td class="c">۵٪</td><td><span class="badge mid">◐ ۹۵٪</span> <span class="tag">scope، event args و rebuild پیاده شد</span></td><td class="c">۴.۷۵٪</td></tr>
+      <tr><td class="f">Type Checker</td><td class="c">۵٪</td><td><span class="badge mid">◐ ۹۸٪</span> <span class="tag">UI، arity، named args، type alias و unknown calls</span></td><td class="c">۴.۹٪</td></tr>
       <tr><td class="f">Persistent Memory (SQLite)</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۱۰۰٪</span></td><td class="c">۳٪</td></tr>
-      <tr><td class="f">Sandbox / Security</td><td class="c">۳٪</td><td><span class="badge no">✗ ۰٪</span></td><td class="c">۰٪</td></tr>
-      <tr><td class="f">Package Manager</td><td class="c">۲٪</td><td><span class="badge no">✗ ۰٪</span></td><td class="c">۰٪</td></tr>
-      <tr><td class="f">Cross-platform Build</td><td class="c">۳٪</td><td><span class="badge mid">◐ ۳۰٪</span></td><td class="c">۰.۹٪</td></tr>
-      <tr><td class="f">Testing (۸۱ تست)</td><td class="c">۳٪</td><td><span class="badge mid">◐ ۶۵٪</span></td><td class="c">۱.۹۵٪</td></tr>
-      <tr><td class="f">Docs</td><td class="c">۲٪</td><td><span class="badge mid">◐ ۳۰٪</span></td><td class="c">۰.۶٪</td></tr>
-      <tr><td class="f">Examples</td><td class="c">۲٪</td><td><span class="badge mid">◐ ۵۰٪</span></td><td class="c">۱٪</td></tr>
-      <tr class="total"><td colspan="3">جمع کل</td><td class="c">≈ ۹۸٪</td></tr>
+      <tr><td class="f">محافظ مجوزهای درون مفسر</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۱۰۰٪</span> <span class="tag">shell.run، env و memory پایدار کنترل می‌شوند؛ OS sandbox نیست</span></td><td class="c">۳٪</td></tr>
+      <tr><td class="f">Package Manager (APM)</td><td class="c">۲٪</td><td><span class="badge mid">◐ ۱۰۰٪ محلی</span> <span class="tag">path dependency؛ registry خارج از دامنه</span></td><td class="c">۲٪</td></tr>
+      <tr><td class="f">Cross-platform Build</td><td class="c">۳٪</td><td><span class="badge mid">◐ ۶۰٪</span> <span class="tag">workflow سه‌سکویی و release build؛ راه‌دور تأیید نشده</span></td><td class="c">۱.۸٪</td></tr>
+      <tr><td class="f">Testing (۲۷۴ تست)</td><td class="c">۳٪</td><td><span class="badge mid">◐ ۹۷٪</span> <span class="tag">workspace، lint، package و regressionها سبز</span></td><td class="c">۲.۹۱٪</td></tr>
+      <tr><td class="f">Docs</td><td class="c">۲٪</td><td><span class="badge mid">◐ ۹۲٪</span> <span class="tag">language/stdlib/components/APM به‌روز</span></td><td class="c">۱.۸۴٪</td></tr>
+      <tr><td class="f">Examples</td><td class="c">۲٪</td><td><span class="badge mid">◐ ۹۵٪</span> <span class="tag">ماژول، UI و LLM mock</span></td><td class="c">۱.۹٪</td></tr>
+      <tr class="total"><td colspan="3">جمع وزنیِ نرمال‌شده: ۱۱۰.۳۵ از ۱۱۴</td><td class="c">≈ ۹۷٪</td></tr>
     </table>
   </div>
+  <p class="hint" style="margin-top:14px">
+    وزن‌ها جمعاً ۱۱۴ هستند. عدد ۹۷٪ از تقسیم ۱۱۰.۳۵ بر ۱۱۴ به دست آمده و فقط یک تخمین داخلی است؛
+    برای اعلام ۱۰۰٪ باید کارهای باز پایین تمام و در محیط مقصد آزمایش شوند.
+  </p>
 
   <!-- THREE SCORES -->
   <h2><span class="dot"></span>سه عدد</h2>
-  <p class="hint">همان معیارهای همیشگی، به‌روزشده.</p>
+  <p class="hint">سه نمای تقریبی از دامنه‌های متفاوت، به‌روزشده در ۲۰۲۶-۰۹-۲۵.</p>
   <div class="scores">
     <div class="score">
-      <div class="big" style="color:#7aa2ff">۹۷٪</div>
+      <div class="big" style="color:#7aa2ff">۹۹٪</div>
       <div class="lbl">به عنوان زبان</div>
-      <div class="bar"><i style="width:97%; background:linear-gradient(90deg,#7aa2ff,#9b8cff)"></i></div>
+      <div class="bar"><i style="width:99%; background:linear-gradient(90deg,#7aa2ff,#9b8cff)"></i></div>
     </div>
     <div class="score">
-      <div class="big" style="color:#58e0c8">۹۳٪</div>
+      <div class="big" style="color:#58e0c8">۹۷٪</div>
       <div class="lbl">به عنوان زبان UI</div>
-      <div class="bar"><i style="width:93%; background:linear-gradient(90deg,#58e0c8,#3fb9d8)"></i></div>
+      <div class="bar"><i style="width:97%; background:linear-gradient(90deg,#58e0c8,#3fb9d8)"></i></div>
     </div>
     <div class="score">
-      <div class="big" style="color:#ffb454">۷۱٪</div>
+      <div class="big" style="color:#ffb454">۹۰٪</div>
       <div class="lbl">به عنوان محصول production</div>
-      <div class="bar"><i style="width:71%; background:linear-gradient(90deg,#ffb454,#ff8f6b)"></i></div>
+      <div class="bar"><i style="width:90%; background:linear-gradient(90deg,#ffb454,#ff8f6b)"></i></div>
     </div>
   </div>
   <p class="hint" style="margin-top:14px">
-    «زبان» و «زبان UI» اساساً تمام شده‌اند. فاصلهٔ «محصول production» از آنجا می‌آید که
-    Sandbox/Permissions و Build چندسکویی هنوز نیستند (حافظهٔ پایدار در این جلسه اضافه شد).
+    «زبان» تقریباً تمام است: <span class="kbd">var</span>، interpolation،
+    <span class="kbd">Result</span>/<span class="kbd">?</span>، closure، default/named arguments،
+    nested assignment و guardهای runtime اضافه شدند. namespace-aware module، `pub`، type alias،
+    مدل، component و theme نیز تست شده‌اند. nominal typeها، نتیجهٔ CI روی ویندوز/مک،
+    QA بصری native، registry/signing و sandbox سیستم‌عامل هنوز باقی است.
   </p>
 
   <!-- REMAINING -->
   <h2><span class="dot"></span>چه چیزی مانده تا ۱۰۰٪</h2>
-  <p class="hint">دسته‌بندی و تخمین زمانی خودت، با وضعیت فعلی.</p>
+  <p class="hint">هدف این بخش رسیدن به ۱۰۰٪ واقعی است؛ وضعیت‌ها از مخزن و تست‌ها آمده‌اند.</p>
 
   <div class="two">
     <div class="panel list">
-      <h3>🔴 بحرانی <span class="tag">انجام شد ✓</span></h3>
+      <h3>✅ انجام‌شده در جلسهٔ ۴ و این جلسه <span class="tag">۲۷۴ تست محلی</span></h3>
       <ul>
-        <li><s>Component System</s> ✅ <span class="tag">۵٪</span></li>
-        <li><s>Theme System</s> ✅ <span class="tag">۳٪</span></li>
-        <li><s>if / for در UI</s> ✅</li>
-        <li><s>Messages component</s> ✅</li>
-        <li><s>Chatbot کامل</s> ✅ <span class="tag">قابلیت؛ فایل مثال مانده</span></li>
+        <li><s>گیت نوع در <span class="kbd">aec run</span></s> ✅ <span class="tag">۱۸.۵</span></li>
+        <li><s><span class="kbd">var</span> تغییرپذیر در برابر <span class="kbd">let</span></s> ✅ <span class="tag">۱۸.۷.۱</span></li>
+        <li><s>Interpolation رشته <span class="kbd">"{expr}"</span></s> ✅ <span class="tag">۱۸.۷.۲</span></li>
+        <li><s><span class="kbd">Result</span> + <span class="kbd">?</span> با <span class="kbd">ok</span>/<span class="kbd">err</span></s> ✅ <span class="tag">۱۸.۷.۳</span></li>
+        <li><s>Lambda + کلیدواژهٔ <span class="kbd">function</span></s> ✅ <span class="tag">۱۸.۷.۴</span></li>
+        <li><s>Quick Wins (لیست builtin چکر + <span class="kbd">padding</span>)</s> ✅ <span class="tag">۱۸.۱۳</span></li>
+        <li><s>رفع ۳ باگ پنهان</s> ✅ <span class="tag">none / <span class="kbd">?</span> در نوع / هشدار کاذب</span></li>
       </ul>
     </div>
 
     <div class="panel list">
-      <h3>🟡 مهم <span class="tag">~۱۲ ساعت</span></h3>
+      <h3>🔴 شکاف باقیماندهٔ زبان <span class="tag">طراحی باز</span></h3>
       <ul>
-        <li><s>Type Checker</s> ✅ <span class="tag">فاز ۱</span></li>
-        <li><s>Better Errors</s> ✅ <span class="tag">snippet + caret</span></li>
-        <li><s>Persistent Memory (SQLite)</s> ✅ <span class="tag">۱۸.۱</span></li>
-        <li>Sandbox / Permissions (capability)</li>
-        <li>Cross-platform Build</li>
-        <li>State Sync کامل (UI ↔ Runtime)</li>
+        <li>نوع‌های nominal و aliasهای پیچیده‌تر <span class="tag">۱۸.۸</span>
+          <div style="color:var(--faint);font-size:12.5px">
+            type alias ساده اضافه و تست شده؛ struct/enum nominal و inference کامل هنوز باز است.
+          </div>
+        </li>
+      </ul>
+      <h3 style="margin-top:16px">🟡 مهم برای محصول</h3>
+      <ul>
+        <li>State Sync کامل (UI ↔ Runtime) <span class="tag">۱۸.۴</span>
+          <div style="color:var(--faint);font-size:12.5px">
+            state سراسری در شاخه‌های شرطی، scope کامپوننت/loop، event arguments و rebuild واکنشی پیاده شده‌اند.
+            QA بصری پنجرهٔ واقعی در محیط‌های مقصد باقی است.
+          </div>
+        </li>
+        <li>تأیید اجرای CI روی سه سیستم‌عامل و بسته‌بندی خروجی <span class="tag">۱۸.۳ / ۱۸.۹</span></li>
+        <li>Type Checker فاز ۲ (استنتاج عمیق‌تر، نوع nominal) <span class="tag">۱۸.۸</span></li>
       </ul>
     </div>
 
     <div class="panel list">
-      <h3>🟢 خوب <span class="tag">~۳۰ ساعت</span></h3>
+      <h3>🟢 تکمیل و توزیع</h3>
       <ul>
-        <li>Package Manager (AECPM)</li>
-        <li>Testing Framework (CI + پوشش)</li>
-        <li>Docs کامل</li>
-        <li>Examples (گالری نمونه)</li>
-        <li>Optimization</li>
-        <li>A2A Protocol (multi-agent)</li>
-        <li>IDE / Visual Studio</li>
+        <li>CI سه‌سکویی با build، package و smoke test نوشته شد؛ گزارش واقعی راه‌دور و release artifact باقی است <span class="tag">۱۸.۹</span></li>
+        <li>راهنمای زبان، builtin، theme، component و APM به‌روز شد <span class="tag">۱۸.۱۰</span></li>
+        <li>مثال چت آفلاین، ماژول alias و LLM mock اضافه شد؛ چت متصل به کلید واقعی ندارد <span class="tag">۱۸.۱۰</span></li>
+        <li>APM محلی: binary <span class="kbd">apm</span>، manifest + lockfile + <span class="kbd">init</span>/<span class="kbd">add</span>/<span class="kbd">remove</span>/<span class="kbd">install</span>/<span class="kbd">list</span>/<span class="kbd">tree</span> <span class="tag">۱۸.۱۱</span></li>
+        <li>Optimization / A2A / IDE پس از تکمیل دامنهٔ زبان <span class="tag">۱۸.۱۲</span></li>
+        <li>به‌روز نگه‌داشتن همین گزارش <span class="tag">۱۸.۱۳.۵</span></li>
       </ul>
     </div>
 
     <div class="panel list">
-      <h3>📦 تغییرات این جلسات</h3>
+      <h3>📦 تغییرات تازه <span class="tag">۲۰۲۶-۰۹-۲۵</span></h3>
       <ul>
-        <li>Component System + Theme System کامل</li>
-        <li><b>crate جدید <span class="kbd">aec-check</span></b> + اتصال به <span class="kbd">aec check</span></li>
-        <li>Better Errors: snippet + caret برای خطای پارس و نوع</li>
-        <li>رفع شکاف <span class="kbd">and</span> / <span class="kbd">or</span> در grammar</li>
-        <li>رفع باگ <span class="kbd">primary_arg</span> + اعمال inline style</li>
-        <li>۸۱ تست سبز + <span class="kbd">examples/theme.aec</span></li>
-        <li><b>حافظهٔ پایدار</b>: <span class="kbd">rusqlite</span> + <span class="kbd">memory.open</span> + ۱۱ تست جدید runtime</li>
+        <li>بارگذار چندفایلی، <span class="kbd">pub</span>/alias، duplicate detection و گزارش منبع خطا در <span class="kbd">check</span>، <span class="kbd">ast</span> و <span class="kbd">run</span></li>
+        <li>واکنش‌پذیری UI، scope component/loop، event arguments، type/UI diagnostics و parse_color امن</li>
+        <li>arity و overflow guard، default/named args، nested assignment، match binding، higher-order helpers و محافظ env/memory</li>
+        <li>مدل‌های `model.think`، LLM timeout/response validation، type alias، namespace چندلایه و component/theme عمومی اضافه شدند</li>
+        <li>بسته‌بندی workspace، release build و startup تست native زیر Xvfb با موفقیت محلی اجرا شدند؛ capture بصری کامل نیست</li>
+        <li><b>۲۷۴ تست سبز روی لینوکس</b>؛ بدون کامیت یا push جدید</li>
       </ul>
     </div>
   </div>
@@ -306,9 +358,10 @@
   <div class="callout">
     <div class="ic">⏳</div>
     <div>
-      <b>جمع باقی‌مانده:</b> بحرانی ۰ ساعت (انجام شد) · مهم ~۱۲ ساعت · خوب ~۲۵ ساعت →
-      در مجموع <b>≈ ۳۷ ساعت</b>. با همان ریتمی که داشتی، زبانِ کامل حدوداً چند روز کار است؛
-      «محصول production» یک پله بعد از آن.
+      <b>شرط رسیدن به ۱۰۰٪:</b> تکمیل nominal typeها، آزمودن واقعی CI روی ویندوز/مک،
+      QA بصری native، انتشار/signing و تعیین policy برای registry و sandbox سیستم‌عامل. بسته‌بندی محلی و
+      release build انجام شده‌اند. <a href="language.md">راهنمای زبان</a>،
+      <a href="stdlib.md">مرجع builtinها</a> و <a href="apm.md">APM</a> اکنون در دسترس‌اند.
     </div>
   </div>
 
@@ -323,7 +376,7 @@
     </div>
     <div class="step done">
       <div class="st-top"><span class="st-name"><span class="badge ok">✓ انجام شد</span> ۱ — Type Checker فاز ۱</span></div>
-      <div class="st-desc">crate <span class="kbd">aec-check</span> + اتصال به <span class="kbd">aec check</span>. (inference عمیق‌تر و <span class="kbd">Result</span>/<span class="kbd">?</span> بعداً)</div>
+      <div class="st-desc">crate <span class="kbd">aec-check</span> + اتصال به <span class="kbd">aec check</span> و <span class="kbd">aec run</span></div>
     </div>
     <div class="step done">
       <div class="st-top"><span class="st-name"><span class="badge ok">✓ انجام شد</span> ۲ — Better Errors</span></div>
@@ -331,30 +384,42 @@
     </div>
     <div class="step done">
       <div class="st-top"><span class="st-name"><span class="badge ok">✓ انجام شد</span> ۳ — Persistent Memory (SQLite)</span></div>
-      <div class="st-desc">حافظهٔ گفتگو بین اجراها با <span class="kbd">rusqlite</span> (bundled) + <span class="kbd">memory.open</span> و aliasهای <span class="kbd">memory_*</span> + <span class="kbd">examples/memory.aec</span></div>
+      <div class="st-desc">حافظهٔ گفتگو بین اجراها با <span class="kbd">rusqlite</span> (bundled) + <span class="kbd">memory.open</span> + <span class="kbd">examples/memory.aec</span></div>
+    </div>
+    <div class="step done">
+      <div class="st-top"><span class="st-name"><span class="badge ok">✓ انجام شد</span> ۴ — Sandbox / Permissions</span></div>
+      <div class="st-desc">allowlist شبکه/فایل/سیستم + <span class="kbd">limits</span>؛ با بلاک، <span class="kbd">shell.run</span>، <span class="kbd">env</span> و memory پایدار هم محدود می‌شوند. محافظ درون‌مفسری است.</div>
+    </div>
+    <div class="step done">
+      <div class="st-top"><span class="st-name"><span class="badge ok">✓ انجام شد</span> ۵ — سمنتیک زبان: <span class="kbd">var</span> / interpolation / <span class="kbd">Result</span> / closure</span></div>
+      <div class="st-desc">جلسهٔ ۴ — آخرین شکاف فیچری زبان بسته شد + نوع تابع <span class="kbd">function</span></div>
+    </div>
+    <div class="step done">
+      <div class="st-top"><span class="st-name"><span class="badge ok">✓ انجام شد</span> ۶ — ماژول و چندفایلی (+ <span class="kbd">pub</span>)</span></div>
+      <div class="st-desc">namespace-aware module، alias چندلایه، private/public، type alias و تست‌های CLI پیاده شدند.</div>
     </div>
     <div class="step">
-      <div class="st-top"><span class="st-name">۴ — Sandbox / Permissions</span></div>
-      <div class="st-desc">اعلام مجوز + اجرای capability-based برای <span class="kbd">network</span> / <span class="kbd">filesystem</span></div>
+      <div class="st-top"><span class="st-name"><span class="badge mid">◐ بخشی انجام شد</span> ۷ — Testing Framework + CI</span></div>
+      <div class="st-desc">۲۷۴ تست محلی، clippy، package workspace و workflow سه‌سکویی با build/package/smoke؛ نتیجهٔ GitHub هنوز تأیید نشده است.</div>
     </div>
     <div class="step">
-      <div class="st-top"><span class="st-name">۵ — Cross-platform Build</span></div>
-      <div class="st-desc">خروجی برای ویندوز/مک/لینوکس (و بعد موبایل)</div>
+      <div class="st-top"><span class="st-name"><span class="badge mid">◐ بخشی انجام شد</span> ۸ — State Sync کامل (UI ↔ Runtime)</span></div>
+      <div class="st-desc">scope component/loop، event arguments و rebuild واکنشی پیاده شده؛ QA بصری باقی است.</div>
     </div>
     <div class="step">
-      <div class="st-top"><span class="st-name">۶ — Testing Framework + CI</span></div>
-      <div class="st-desc">پوشش تست منظم و اجرای خودکار روی هر تغییر (runtime الان ۱۱ تست دارد)</div>
+      <div class="st-top"><span class="st-name">۹ — Cross-platform Build</span></div>
+      <div class="st-desc">CI برای ویندوز/مک/لینوکس نوشته شده؛ build/package محلی موفق است، اما اجرای واقعی مقصد و artifact امضا نشده‌اند.</div>
     </div>
     <div class="step">
-      <div class="st-top"><span class="st-name">۷ — Docs + Examples</span></div>
-      <div class="st-desc">مستندات زبان، مرجع Built-ins، و گالری نمونه (از جمله chatbot نمونه)</div>
+      <div class="st-top"><span class="st-name">۱۰ — Docs + Examples</span></div>
+      <div class="st-desc">README و راهنماها اضافه شدند؛ مثال چت آفلاین با تست رویداد کار می‌کند.</div>
     </div>
     <div class="step">
-      <div class="st-top"><span class="st-name">۸ — Package Manager</span></div>
-      <div class="st-desc">AECPM: manifest + lockfile + <span class="kbd">aec add</span></div>
+      <div class="st-top"><span class="st-name">۱۱ — Package Manager</span></div>
+      <div class="st-desc">APM محلی: binary <span class="kbd">apm</span>، manifest + lockfile + <span class="kbd">init</span>/<span class="kbd">add</span>/<span class="kbd">remove</span>/<span class="kbd">install</span>/<span class="kbd">list</span>/<span class="kbd">tree</span> و تست integration</div>
     </div>
     <div class="step">
-      <div class="st-top"><span class="st-name">🏁 ۱۰۰٪ — زبان کامل</span></div>
+      <div class="st-top"><span class="st-name">🏁 هدف ۱۰۰٪ — دامنهٔ کامل</span></div>
       <div class="st-desc">بعد از این، A2A و IDE روی همین پایه سوار می‌شوند</div>
     </div>
   </div>
@@ -362,15 +427,26 @@
   <div class="callout blue">
     <div class="ic">🧭</div>
     <div>
-      <b>جمع‌بندی یک‌خطی:</b> AEC الان <b>یک زبان است</b> — نه یک سند. هسته، UI و
-      <b>صحت (Type Checker + Errors)</b> تمام‌اند و <b>ماندگاری (Memory)</b> هم اضافه شد؛
-      باقی‌مانده عملاً یک تکه است: <b>توزیع و مهار</b> (Sandbox + Cross-platform Build)
-      همراه با تکمیل ابزار و مستندات. هیچ‌کدام بازنویسی نمی‌خواهد؛ فقط اضافه شدن.
+      <b>جمع‌بندی یک‌خطی:</b> AEC اکنون یک زبان با هستهٔ runtime، type checker، UI واکنشی،
+      حافظه، مجوز داخلی، مدل‌های LLM، import عمومی و APM محلی است. آنچه باقی مانده
+      verification خارج از این محیط و چند تصمیم طراحی است؛ عدد ۹۷٪ ادعای production کامل نیست.
+    </div>
+  </div>
+
+  <div class="callout">
+    <div class="ic">⚠️</div>
+    <div>
+      <b>محدودیت‌هایی که باید بدانی</b> (جزئیات در بخش ۶ و ۹ هندآف):
+      <ul style="margin:8px 18px 0 0; padding:0; font-size:13px">
+        <li><span class="kbd">shell.run</span>، environment و memory پایدار با بلاک مجوز رد می‌شوند، مدل به allowlist شبکه می‌رود و redirect دنبال نمی‌شود. این محافظ sandbox سیستم‌عامل نیست.</li>
+        <li><span class="kbd">map</span>/<span class="kbd">filter</span>/<span class="kbd">reduce</span> با closure کار می‌کنند؛ برای lambda چندپارامتری در آرگومان، پرانتز را در syntax رعایت کن.</li>
+        <li>capture در lambda <b>by-move</b> است (snapshot در لحظهٔ ساخت)، نه by-reference.</li>
+      </ul>
     </div>
   </div>
 
   <footer>
-    AEC — گزارش وضعیت زبان · ۲۰۲۶-۰۹-۲۱ · دامنه: زبان (نه اکوسیستم) · تغییرات فقط در <span class="kbd">/home/mamadi/aec</span>
+    AEC — گزارش وضعیت زبان · ۲۰۲۶-۰۹-۲۵ · ۲۷۴ تست سبز روی لینوکس · هدف: ۱۰۰٪ واقعی و قابل آزمون
   </footer>
 </div>
 </body>

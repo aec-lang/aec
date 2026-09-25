@@ -1,0 +1,6 @@
+agent Modules
+import "./math.aec"
+
+fn main() -> int {
+    return double(21)
+}

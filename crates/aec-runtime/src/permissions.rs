@@ -6,10 +6,10 @@
 //!   - `filesystem` → `file.read/write/append/exists/delete/mkdir/copy/size/list_dir`
 //!   - `system`     → `sys.info`
 //!
-//! **Not covered** (deliberate, recorded in the report):
-//!   - `shell.run` runs any command and stays outside this gate; truly
-//!     containing it needs an OS-level sandbox, not this layer.
-//!   - `sys.exit` is always allowed (per the design document).
+//! `shell.run` is denied whenever a permissions block is present. Allowing
+//! arbitrary commands would bypass the other guards. Without a permissions
+//! block it remains available for backwards compatibility. `sys.exit` is
+//! always allowed (per the design document).
 //!
 //! **Activation rule:** if the program has no `permissions` block, no gate is
 //! applied (open behaviour, backwards compatible). With the block present, the
@@ -77,6 +77,17 @@ impl Permissions {
         };
 
         match name {
+            "shell.run" | "shell_run" => {
+                Err("shell execution denied: shell.run is unavailable when permissions are declared".into())
+            }
+            "llm.complete" | "llm_complete" => match args.first() {
+                Some(Value::String(_)) => self.check_network(crate::llm::DEFAULT_BASE_URL),
+                Some(Value::Object(options)) => match options.get("base_url") {
+                    Some(Value::String(url)) => self.check_network(url),
+                    _ => self.check_network(crate::llm::DEFAULT_BASE_URL),
+                },
+                _ => Ok(()),
+            },
             // ---------- network ----------
             "http.get" | "http_get" | "http.post" | "http_post" | "http.put" | "http_put"
             | "http.delete" | "http_delete" => match arg_str(0) {
@@ -111,6 +122,18 @@ impl Permissions {
 
             // ---------- system ----------
             "sys.info" | "sys_info" => self.check_system_metrics(),
+            "sys.args" | "sys_args" | "args" => {
+                Err("system access denied: process arguments are not available when permissions are declared".into())
+            }
+            "env.get" | "env_get" | "env.set" | "env_set" | "sys.env_all"
+            | "sys_env_all" => {
+                Err("system access denied: environment access requires an explicit capability".into())
+            }
+            "memory.open" | "memory_open" | "memory.add" | "memory_add"
+            | "memory.get" | "memory_get" | "memory.clear" | "memory_clear"
+            | "memory.count" | "memory_count" => {
+                Err("memory access denied: persistent memory is not available when permissions are declared".into())
+            }
 
             _ => Ok(()),
         }
@@ -214,7 +237,7 @@ impl Limits {
                     limits.concurrency = Some(*n as u64);
                 }
                 ("timeout", aec_ast::Literal::Duration(d)) => {
-                    limits.timeout_ms = Some(d.value * d.unit.to_ms());
+                    limits.timeout_ms = d.value.checked_mul(d.unit.to_ms());
                 }
                 ("timeout", aec_ast::Literal::Int(ms)) if *ms >= 0 => {
                     // `timeout: 500` → milliseconds

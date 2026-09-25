@@ -34,6 +34,40 @@ fn main() -> int {
 }
 
 #[test]
+fn ui_state_names_are_known_to_event_functions() {
+    let source = r#"agent Chat
+
+fn send() {
+    if draft != "" {
+        push_to("messages", { role: "user", content: draft })
+    }
+}
+
+ui Main = Screen "Chat" {
+    Column {
+        @draft: string = ""
+        if true {
+            @messages = []
+        }
+    }
+}
+"#;
+    assert_eq!(diags(source), Vec::new());
+}
+
+#[test]
+fn indexing_known_non_collection_reports_error() {
+    let source = "agent Test\nfn main() -> int {\n    let value = 42\n    let bad = value[0]\n    return 0\n}\n";
+    assert!(has(&errors(source), DiagKind::NotIndexable));
+}
+
+#[test]
+fn string_indexing_remains_valid() {
+    let source = "agent Test\nfn main() -> int {\n    let letter: string = \"abc\"[0]\n    return 0\n}\n";
+    assert_eq!(errors(source), Vec::new());
+}
+
+#[test]
 fn valid_string_concat_and_float_mix() {
     let src = r#"agent Test
 
@@ -91,6 +125,29 @@ fn ask() -> string {
 }
 "#;
     assert_eq!(errors(src), Vec::new());
+}
+
+#[test]
+fn named_type_aliases_are_resolved() {
+    let src = r#"agent Test
+
+type UserId = string
+
+fn echo(value: UserId) -> UserId {
+    return value
+}
+
+fn main() -> UserId {
+    return echo("ok")
+}
+"#;
+    assert_eq!(errors(src), Vec::new());
+}
+
+#[test]
+fn named_type_alias_mismatch_is_reported() {
+    let src = "agent Test\ntype UserId = string\nfn main() -> int {\n    let value: UserId = 1\n    return 0\n}\n";
+    assert!(has(&errors(src), DiagKind::TypeMismatch));
 }
 
 #[test]
@@ -244,10 +301,9 @@ fn is_ok_returns_a_bool() {
 }
 
 #[test]
-fn try_on_a_non_result_is_lenient() {
-    // The runtime rejects `1?`, but the checker stays lenient (Any) on purpose.
+fn try_on_a_non_result_is_rejected() {
     let src = "agent Test\n\nfn f() -> int {\n    let v = 1?\n    return v\n}\n";
-    assert_eq!(errors(src), Vec::new());
+    assert!(has(&errors(src), DiagKind::TypeMismatch));
 }
 
 // ---------- optional types ----------
@@ -482,4 +538,46 @@ fn diagnostics_carry_line_and_column() {
         "message: {}",
         diags[0].message
     );
+}
+
+#[test]
+fn ui_state_type_mismatch_is_reported() {
+    let src = r#"agent Test
+ui Main = Screen "Test" {
+    @count: int = "wrong"
+    Text count
+}
+"#;
+    assert!(has(&errors(src), DiagKind::TypeMismatch));
+}
+
+#[test]
+fn ui_binding_and_component_props_are_validated() {
+    let src = r#"agent Test
+component Card {
+    prop title: string
+    render { Text title }
+}
+ui Main = Screen "Test" {
+    Input placeholder: "type" bind value to missing
+    Card
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.kind == DiagKind::InvalidUi));
+}
+
+#[test]
+fn unknown_functions_are_errors() {
+    let src = "agent Test\nfn f() -> int { return missing_function() }\n";
+    assert!(has(&errors(src), DiagKind::UnknownFunction));
+}
+
+#[test]
+fn named_arguments_are_checked_by_name() {
+    let src = r#"agent Test
+fn pair(a: int, b: int) -> int { return a + b }
+fn f() -> int { return pair(b: 2, a: 1) }
+"#;
+    assert_eq!(errors(src), Vec::new());
 }

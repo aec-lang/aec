@@ -34,6 +34,57 @@ fn call(interp: &mut Interpreter, name: &str, args: Vec<Value>) -> Result<Value,
     interp.call_function(name, args, Span::dummy())
 }
 
+#[test]
+fn shell_cannot_bypass_declared_permissions() {
+    let mut restricted = interpreter_for("agent Restricted\npermissions {\n    network: []\n}\n");
+    for name in ["shell.run", "shell_run"] {
+        let result = call(&mut restricted, name, vec![Value::String("echo bypass".into())]);
+        assert!(matches!(result, Err(RuntimeError::PermissionDenied { .. })), "{name}: {result:?}");
+    }
+
+    let mut unrestricted = interpreter_for("agent Unrestricted\n");
+    let result = call(&mut unrestricted, "shell.run", vec![Value::String("echo allowed".into())]);
+    assert!(matches!(result, Ok(Value::Object(_))), "{result:?}");
+}
+
+#[test]
+fn model_requests_respect_the_network_allowlist() {
+    let mut interpreter = interpreter_for("agent Restricted\npermissions {\n    network: []\n}\n");
+    for name in ["llm.complete", "llm_complete"] {
+        let result = call(&mut interpreter, name, vec![Value::String("Hello".into())]);
+        assert!(matches!(result, Err(RuntimeError::PermissionDenied { .. })), "{name}: {result:?}");
+    }
+
+    let mut interpreter = interpreter_for("agent Restricted\npermissions {\n    network: [\"api.openai.com\"]\n}\n");
+    let mut options = std::collections::HashMap::new();
+    options.insert("prompt".into(), Value::String("Hello".into()));
+    options.insert("base_url".into(), Value::String("https://other.example/v1".into()));
+    let result = call(&mut interpreter, "llm.complete", vec![Value::Object(options)]);
+    assert!(matches!(result, Err(RuntimeError::PermissionDenied { .. })), "{result:?}");
+}
+
+#[test]
+fn restricted_http_does_not_follow_redirects() {
+    use std::io::{Read, Write};
+    let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = server.local_addr().unwrap();
+    let worker = std::thread::spawn(move || {
+        let (mut stream, _) = server.accept().unwrap();
+        let mut request = [0; 2048];
+        let _ = stream.read(&mut request).unwrap();
+        stream.write_all(b"HTTP/1.1 302 Found\r\nLocation: http://blocked.example/secret\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+    });
+
+    let mut interpreter = Interpreter::new();
+    interpreter.permissions = Some(Permissions {
+        network: Some(vec!["127.0.0.1".into()]),
+        ..Default::default()
+    });
+    let result = call(&mut interpreter, "http.get", vec![Value::String(format!("http://{address}/start"))]);
+    worker.join().unwrap();
+    assert!(matches!(result, Ok(Value::Object(fields)) if matches!(fields.get("status"), Some(Value::Int(302)))));
+}
+
 // ---------------------------------------------------------------------------
 // host extraction
 // ---------------------------------------------------------------------------
@@ -523,4 +574,99 @@ fn permissions_relative_root_is_resolved_against_cwd() {
         .check_fs(absolute_cwd.join("Cargo.toml").to_str().unwrap(), FsMode::Read)
         .is_ok());
     assert!(perms.check_fs("Cargo.toml", FsMode::Read).is_ok());
+}
+
+#[test]
+fn llm_uses_configured_timeout_and_requires_response_content() {
+    use std::io::{Read, Write};
+    let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = server.local_addr().unwrap();
+    let worker = std::thread::spawn(move || {
+        let (mut stream, _) = server.accept().unwrap();
+        let mut request = [0; 4096];
+        let _ = stream.read(&mut request).unwrap();
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 82\r\nConnection: close\r\n\r\n{\"choices\":[{\"message\":{\"content\":\"pong\"},\"finish_reason\":\"stop\"}],\"model\":\"test\"}",
+            )
+            .unwrap();
+    });
+    let mut options = std::collections::HashMap::new();
+    options.insert("prompt".to_string(), Value::String("ping".to_string()));
+    options.insert("base_url".to_string(), Value::String(format!("http://{address}/v1")));
+    options.insert("api_key".to_string(), Value::String("test-key".to_string()));
+    let mut interpreter = Interpreter::new();
+    let result = call(
+        &mut interpreter,
+        "llm.complete",
+        vec![Value::Object(options)],
+    );
+    worker.join().unwrap();
+    let value = result.expect("LLM request should succeed");
+    assert!(matches!(value, Value::Object(fields) if matches!(fields.get("text"), Some(Value::String(text)) if text == "pong")));
+}
+
+#[test]
+fn declared_models_expose_think_through_the_model_adapter() {
+    use std::io::{Read, Write};
+    let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = server.local_addr().unwrap();
+    let worker = std::thread::spawn(move || {
+        let (mut stream, _) = server.accept().unwrap();
+        let mut request = [0; 4096];
+        let _ = stream.read(&mut request).unwrap();
+        let body = r#"{"choices":[{"message":{"content":"model-pong"},"finish_reason":"stop"}],"model":"test"}"#;
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+    });
+    let source = format!(
+        "agent T\nmodel primary {{\n    name: \"test\"\n    base_url: \"http://{address}/v1\"\n    api_key: \"test-key\"\n}}\nfn f() -> int {{\n    let response = primary.think(\"ping\")\n    return len(response.text)\n}}\n"
+    );
+    let mut interpreter = interpreter_for(&source);
+    let result = call(&mut interpreter, "f", vec![]);
+    worker.join().unwrap();
+    assert!(matches!(result, Ok(Value::Int(10))));
+}
+
+#[test]
+fn restricted_environment_and_memory_are_denied() {
+    let src = r#"agent T
+permissions {
+    network: []
+}
+fn read_env() -> string { return env.get("SECRET") }
+fn all_env() -> int { return len(sys.env_all()) }
+fn open_memory() -> int { memory.open("restricted.sqlite") return 1 }
+"#;
+    let mut interp = interpreter_for(src);
+    for (name, args) in [
+        ("read_env", vec![]),
+        ("all_env", vec![]),
+        ("open_memory", vec![]),
+    ] {
+        assert!(
+            matches!(call(&mut interp, name, args), Err(RuntimeError::PermissionDenied { .. })),
+            "{name} should be denied"
+        );
+    }
+}
+
+#[test]
+fn running_a_new_program_resets_policy_and_memory() {
+    let restricted = "agent Restricted\npermissions { network: [] }\nfn probe() -> int { return 1 }\n";
+    let unrestricted = "agent Open\nfn probe() -> int { return 2 }\n";
+    let mut interp = interpreter_for(restricted);
+    assert!(interp.permissions.is_some());
+    let open = aec_parser::parse(unrestricted).unwrap();
+    interp.run(&open).unwrap();
+    assert!(interp.permissions.is_none());
+    assert!(matches!(call(&mut interp, "probe", vec![]), Ok(Value::Int(2))));
 }

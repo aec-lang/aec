@@ -6,7 +6,7 @@ agent_header = { "agent" ~ identifier ~ NEWLINE }
 // string interpolation (`"{a + 1}"`) back into an expression.
 expr_root = { SOI ~ NEWLINE* ~ expr ~ NEWLINE* ~ EOI }
 
-top_level_item = _{ secrets_block | permissions_block | limits_block | model_decl | import_stmt | fn_decl | component_decl | theme_decl | ui_decl }
+top_level_item = _{ secrets_block | permissions_block | limits_block | model_decl | type_alias | import_stmt | fn_decl | component_decl | theme_decl | ui_decl }
 
 import_stmt = { "import" ~ string_literal ~ alias? ~ NEWLINE }
 alias       = { "as" ~ identifier }
@@ -33,7 +33,7 @@ system_field = { identifier ~ ":" ~ bool_literal ~ NEWLINE* }
 limits_block = { "limits" ~ "{" ~ NEWLINE* ~ limits_entry* ~ "}" ~ NEWLINE* }
 limits_entry = { identifier ~ ":" ~ literal ~ NEWLINE* }
 
-model_decl  = { "model" ~ identifier ~ "{" ~ NEWLINE ~ model_field* ~ "}" ~ NEWLINE }
+model_decl  = { visibility? ~ "model" ~ identifier ~ "{" ~ NEWLINE ~ model_field* ~ "}" ~ NEWLINE }
 model_field = _{ retry_block | capabilities_block | model_property }
 model_property = { identifier ~ ":" ~ literal ~ NEWLINE }
 
@@ -137,7 +137,8 @@ argument        = { (identifier ~ ":")? ~ expr }
 
 // ---------- Functions ----------
 
-fn_decl = { "fn" ~ identifier ~ "(" ~ param_list? ~ ")" ~ return_type? ~ block ~ NEWLINE* }
+type_alias = { visibility? ~ "type" ~ identifier ~ "=" ~ full_type ~ NEWLINE }
+fn_decl = { visibility? ~ "fn" ~ identifier ~ "(" ~ param_list? ~ ")" ~ return_type? ~ block ~ NEWLINE* }
 
 param_list = { param ~ ("," ~ param)* }
 param = { identifier ~ ":" ~ full_type ~ ("=" ~ expr)? }
@@ -150,7 +151,8 @@ full_type = { base_type ~ optional_marker? }
 optional_marker = { "?" }
 
 primitive_type = @{ "string" | "int" | "float" | "bool" | "bytes" | "unit" | "uuid" | "timestamp" | "function" }
-named_type     = { identifier }
+named_type     = { qualified_type_name }
+qualified_type_name = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ".")* }
 array_type     = { "[" ~ base_type ~ "]" }
 result_type    = { "Result" ~ "(" ~ base_type ~ "," ~ base_type ~ ")" }
 
@@ -176,6 +178,7 @@ return_stmt = { "return" ~ expr? }
 expr_stmt   = { expr }
 
 identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+visibility = @{ "pub" ~ !(ASCII_ALPHANUMERIC | "_") }
 
 WHITESPACE = _{ " " | "\t" }
 COMMENT    = _{ "#" ~ (!NEWLINE ~ ANY)* }
@@ -186,7 +189,7 @@ NEWLINE    = _{ ("\n" | "\r\n")+ }
 // ============================================================
 
 // component MessageBubble { prop role: string render { ... } }
-component_decl = { "component" ~ identifier ~ "{" ~ NEWLINE* ~ component_prop* ~ component_render? ~ NEWLINE* ~ "}" ~ NEWLINE* }
+component_decl = { visibility? ~ "component" ~ identifier ~ "{" ~ NEWLINE* ~ component_prop* ~ component_render? ~ NEWLINE* ~ "}" ~ NEWLINE* }
 component_prop = { "prop" ~ identifier ~ (":" ~ component_type)? ~ NEWLINE* }
 component_type = { base_type }
 component_render = { "render" ~ "{" ~ NEWLINE* ~ (ui_statement ~ NEWLINE*)* ~ "}" }
@@ -195,11 +198,20 @@ component_use = {
       | "Display" | "Messages" | "Heading" | "Spacer")
     ~ component_name ~ (component_arg)* ~ NEWLINE*
 }
-component_name = @{ ('A'..'Z') ~ (ASCII_ALPHANUMERIC | "_")* }
+component_name = @{
+    component_plain_name
+  | component_qualified_name
+}
+component_plain_name = @{ ('A'..'Z') ~ (ASCII_ALPHANUMERIC | "_")* }
+component_qualified_name = @{
+    (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")*
+  ~ ("." ~ ('a'..'z' | "_") ~ (ASCII_ALPHANUMERIC | "_")*)*
+  ~ "." ~ ('A'..'Z') ~ (ASCII_ALPHANUMERIC | "_")*
+}
 component_arg = { identifier ~ ":" ~ expr }
 
 // theme Dark { color { background: "#1e1e2e" } text { size: 16 } }
-theme_decl = { "theme" ~ identifier ~ theme_default? ~ theme_extends? ~ "{" ~ NEWLINE* ~ theme_group* ~ "}" ~ NEWLINE* }
+theme_decl = { visibility? ~ "theme" ~ identifier ~ theme_default? ~ theme_extends? ~ "{" ~ NEWLINE* ~ theme_group* ~ "}" ~ NEWLINE* }
 theme_default = { "default" }
 theme_extends = { "extends" ~ identifier }
 theme_group = { identifier ~ "{" ~ NEWLINE* ~ theme_entry* ~ "}" ~ NEWLINE* }
@@ -210,7 +222,7 @@ theme_value = _{ style_string | style_number | style_bool | identifier }
 design_token = { "theme" ~ ("." ~ identifier)+ }
 
 // ui Main = Screen "Title" { ... }
-ui_decl = { "ui" ~ identifier ~ "=" ~ screen_expr ~ NEWLINE* }
+ui_decl = { visibility? ~ "ui" ~ identifier ~ "=" ~ screen_expr ~ NEWLINE* }
 
 screen_expr = { "Screen" ~ string_literal ~ block_ui }
 

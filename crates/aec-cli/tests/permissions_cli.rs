@@ -3,7 +3,7 @@
 //! Goal: make sure a permission violation reaches the user as a **clear error**
 //! (not a panic), and that a program without a `permissions` block runs untouched.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn tmp_dir(name: &str) -> PathBuf {
@@ -12,13 +12,13 @@ fn tmp_dir(name: &str) -> PathBuf {
     dir
 }
 
-fn write_file(dir: &PathBuf, name: &str, content: &str) -> PathBuf {
+fn write_file(dir: &Path, name: &str, content: &str) -> PathBuf {
     let path = dir.join(name);
     std::fs::write(&path, content).expect("write temp source");
     path
 }
 
-fn run_cli(args: &[&str], cwd: &PathBuf) -> (bool, String, String) {
+fn run_cli(args: &[&str], cwd: &Path) -> (bool, String, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_aec"))
         .args(args)
         .current_dir(cwd)

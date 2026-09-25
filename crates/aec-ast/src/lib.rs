@@ -20,15 +20,15 @@ pub use expr::{
 };
 pub use function::{
     AssignOp, AssignStmt, Block, ElseBranch, ForStmt, FunctionDecl, IfStmt, LValue, LValueStep,
-    LetStmt, Parameter, ReturnStmt, Statement, TypeExpr, WhileStmt,
+    LetStmt, Parameter, ReturnStmt, Statement, TypeAliasDecl, TypeExpr, WhileStmt,
 };
 pub use literal::{Duration, DurationUnit, InterpPart, Literal};
-pub use model::{ModelDecl, ModelField, ModelProperty, RetryBlock, RetryField};
+pub use model::{CapabilitiesBlock, ModelDecl, ModelField, ModelProperty, RetryBlock, RetryField};
 pub use permissions::{
     FilesystemRule, LimitsBlock, LimitsEntry, NetworkRule, PermissionsBlock, PermissionsEntry,
     SystemRule,
 };
-pub use program::{AgentHeader, Identifier, ImportStmt, Program, TopLevelItem};
+pub use program::{AgentHeader, Identifier, ImportStmt, Program, ResolvedImport, TopLevelItem};
 pub use span::{Position, Span, Spanned};
 pub use style::{Style, StyleValue};
 pub use theme::{ThemeDecl, ThemeEntry, ThemeGroup};

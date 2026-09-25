@@ -1,9 +1,10 @@
 //! Native renderer — egui-based
 
 use crate::widgets::{
-    build_widgets_with_themes, ComponentRegistry, Themes, UiState, UiValue, Widget, WidgetStyle,
+    build_widgets_with_themes, ComponentRegistry, EventAction, Themes, UiState, UiValue, Widget,
+    WidgetStyle,
 };
-use aec_ast::{Program, Span, TopLevelItem, UiDecl};
+use aec_ast::{Program, TopLevelItem, UiDecl, UiStatement};
 use aec_runtime::{Interpreter, Value};
 use eframe::egui;
 use std::collections::HashSet;
@@ -11,6 +12,7 @@ use std::sync::{Arc, Mutex};
 
 pub struct AecApp {
     pub program: Program,
+    #[allow(clippy::arc_with_non_send_sync)]
     pub interpreter: Arc<Mutex<Interpreter>>,
     pub ui_decl: UiDecl,
     pub components: ComponentRegistry,
@@ -21,27 +23,39 @@ pub struct AecApp {
     pub fonts_loaded: bool,
 }
 
+#[allow(clippy::arc_with_non_send_sync)]
 impl AecApp {
     pub fn new(program: Program, ui: UiDecl) -> Result<Self, String> {
         let mut interpreter = Interpreter::new();
         interpreter.run(&program).map_err(|e| e.to_string())?;
 
-        let components: ComponentRegistry = program
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                TopLevelItem::Component(component) => {
-                    Some((component.name.name.clone(), component.clone()))
+        let mut components = ComponentRegistry::new();
+        for (index, item) in program.items.iter().enumerate() {
+            let TopLevelItem::Component(component) = item else {
+                continue;
+            };
+            let module = program.item_modules.get(index).cloned().flatten();
+            if let Some(scope) = module {
+                components.insert(
+                    format!("{}::{}", scope, component.name.name),
+                    component.clone(),
+                );
+                if component.is_public {
+                    components.insert(
+                        format!("{}.{}", scope, component.name.name),
+                        component.clone(),
+                    );
                 }
-                _ => None,
-            })
-            .collect();
+            } else {
+                components.insert(component.name.name.clone(), component.clone());
+            }
+        }
 
-        let themes = Themes::from_items(&program.items);
+        let themes = Themes::from_items_with_modules(&program.items, &program.item_modules);
 
         let mut state = UiState::new();
         let widgets = build_widgets_with_themes(&ui.screen.body, &mut state, &components, &themes);
-        let state_var_names: HashSet<String> = state.values.keys().cloned().collect();
+        let state_var_names = collect_state_names(&ui.screen.body);
 
         sync_state_to_interpreter(&state, &mut interpreter, &state_var_names);
 
@@ -65,8 +79,7 @@ impl AecApp {
         let mut fonts = egui::FontDefinitions::default();
         fonts.font_data.insert(
             "Vazirmatn".to_owned(),
-            egui::FontData::from_static(include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf"))
-                .into(),
+            egui::FontData::from_static(include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf")),
         );
         fonts
             .families
@@ -82,22 +95,81 @@ impl AecApp {
         self.fonts_loaded = true;
     }
 
+    #[cfg(test)]
     fn execute_event(&mut self, fn_name: &str) {
+        self.execute_action(EventAction {
+            handler: aec_ast::Expr::Call(Box::new(aec_ast::CallExpr {
+                callee: aec_ast::Expr::Identifier(aec_ast::Identifier::new(
+                    fn_name,
+                    aec_ast::Span::dummy(),
+                )),
+                args: Vec::new(),
+                span: aec_ast::Span::dummy(),
+            })),
+            span: aec_ast::Span::dummy(),
+            scope: None,
+        });
+    }
+
+    fn execute_action(&mut self, action: EventAction) {
         {
-            let mut interp = self.interpreter.lock().unwrap();
+            let mut interp = self
+                .interpreter
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             sync_state_to_interpreter(&self.state, &mut interp, &self.state_var_names);
+            if let Some(scope) = &action.scope {
+                let prefix = format!("{}::", scope);
+                let local_values: Vec<(String, UiValue)> = self
+                    .state
+                    .values
+                    .iter()
+                    .filter_map(|(key, value)| {
+                        key.strip_prefix(&prefix)
+                            .map(|name| (name.to_string(), value.clone()))
+                    })
+                    .collect();
+                let mut environment = interp.global.borrow_mut();
+                for (name, value) in local_values {
+                    environment.set(name, ui_value_to_aec_value(&value));
+                }
+            }
         }
         let result = {
-            let mut interp = self.interpreter.lock().unwrap();
-            interp.call_function(fn_name, vec![], Span::dummy())
+            let mut interp = self
+                .interpreter
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let global = interp.global.clone();
+            interp.eval_expr(&action.handler, global)
         };
         match result {
-            Ok(_) => eprintln!("[UI] ✅ Executed: {}", fn_name),
-            Err(e) => eprintln!("[UI] ❌ Error in {}: {}", fn_name, e),
+            Ok(_) => eprintln!("[UI] ✅ Executed event"),
+            Err(error) => eprintln!("[UI] ❌ Event error: {}", error),
         }
         {
-            let interp = self.interpreter.lock().unwrap();
+            let interp = self
+                .interpreter
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             sync_state_from_interpreter(&mut self.state, &interp, &self.state_var_names);
+            if let Some(scope) = &action.scope {
+                let prefix = format!("{}::", scope);
+                let names: Vec<String> = self
+                    .state
+                    .values
+                    .keys()
+                    .filter_map(|key| key.strip_prefix(&prefix).map(str::to_string))
+                    .collect();
+                let environment = interp.global.borrow();
+                for name in names {
+                    if let Some(value) = environment.get(&name) {
+                        self.state
+                            .values
+                            .insert(format!("{}{}", prefix, name), aec_value_to_ui_value(&value));
+                    }
+                }
+            }
         }
         let mut rebuild_state = self.state.clone();
         self.widgets = build_widgets_with_themes(
@@ -106,7 +178,37 @@ impl AecApp {
             &self.components,
             &self.themes,
         );
+        self.state = rebuild_state;
+        let mut interp = self
+            .interpreter
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        sync_state_to_interpreter(&self.state, &mut interp, &self.state_var_names);
     }
+}
+
+fn collect_state_names(statements: &[UiStatement]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for statement in statements {
+        match statement {
+            UiStatement::State(state) => {
+                names.insert(state.name.name.clone());
+            }
+            UiStatement::Element(element) => {
+                if let Some(children) = &element.children {
+                    names.extend(collect_state_names(children));
+                }
+            }
+            UiStatement::If(branch) => {
+                names.extend(collect_state_names(&branch.then_body));
+                if let Some(otherwise) = &branch.else_body {
+                    names.extend(collect_state_names(otherwise));
+                }
+            }
+            UiStatement::For(_) | UiStatement::Component(_) => {}
+        }
+    }
+    names
 }
 
 fn sync_state_to_interpreter(
@@ -139,6 +241,7 @@ fn sync_state_from_interpreter(
 
 fn ui_value_to_aec_value(v: &UiValue) -> Value {
     match v {
+        UiValue::None => Value::None,
         UiValue::String(s) => Value::String(s.clone()),
         UiValue::Int(n) => Value::Int(*n),
         UiValue::Float(f) => Value::Float(*f),
@@ -156,6 +259,7 @@ fn ui_value_to_aec_value(v: &UiValue) -> Value {
 
 fn aec_value_to_ui_value(v: &Value) -> UiValue {
     match v {
+        Value::None => UiValue::None,
         Value::String(s) => UiValue::String(s.clone()),
         Value::Int(n) => UiValue::Int(*n),
         Value::Float(f) => UiValue::Float(*f),
@@ -229,16 +333,13 @@ fn make_text(text: &str, style: &WidgetStyle) -> egui::RichText {
 
 fn parse_color(s: &str) -> Option<egui::Color32> {
     let s = s.trim().trim_start_matches('#');
-    if s.len() == 6 {
+    if (s.len() == 6 || s.len() == 8) && s.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         let r = u8::from_str_radix(&s[0..2], 16).ok()?;
         let g = u8::from_str_radix(&s[2..4], 16).ok()?;
         let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-        return Some(egui::Color32::from_rgb(r, g, b));
-    }
-    if s.len() == 8 {
-        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+        if s.len() == 6 {
+            return Some(egui::Color32::from_rgb(r, g, b));
+        }
         let a = u8::from_str_radix(&s[6..8], 16).ok()?;
         return Some(egui::Color32::from_rgba_unmultiplied(r, g, b, a));
     }
@@ -256,7 +357,15 @@ fn parse_color(s: &str) -> Option<egui::Color32> {
 impl eframe::App for AecApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.load_fonts(ctx);
-        let mut pending = Vec::new();
+        let mut rebuild_state = self.state.clone();
+        self.widgets = build_widgets_with_themes(
+            &self.ui_decl.screen.body,
+            &mut rebuild_state,
+            &self.components,
+            &self.themes,
+        );
+        self.state = rebuild_state;
+        let mut pending: Vec<EventAction> = Vec::new();
 
         // Default background taken from the active theme
         let background = self
@@ -279,7 +388,7 @@ impl eframe::App for AecApp {
         });
 
         for event in pending {
-            self.execute_event(&event);
+            self.execute_action(event);
         }
     }
 }
@@ -288,10 +397,20 @@ fn render_widgets(
     ui: &mut egui::Ui,
     widgets: &[Widget],
     state: &mut UiState,
-    pending: &mut Vec<String>,
+    pending: &mut Vec<EventAction>,
 ) {
     for widget in widgets {
         render_widget(ui, widget, state, pending);
+    }
+}
+
+fn render_label(ui: &mut egui::Ui, text: &str, style: &WidgetStyle) {
+    if is_rtl(text) {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+            ui.label(make_text(text, style));
+        });
+    } else {
+        ui.label(make_text(text, style));
     }
 }
 
@@ -299,7 +418,7 @@ fn render_widget(
     ui: &mut egui::Ui,
     widget: &Widget,
     state: &mut UiState,
-    pending: &mut Vec<String>,
+    pending: &mut Vec<EventAction>,
 ) {
     match widget {
         Widget::Column(children, style) => {
@@ -348,7 +467,7 @@ fn render_widget(
         }
 
         Widget::Text(text, style) => {
-            ui.label(make_text(text, style));
+            render_label(ui, text, style);
         }
 
         Widget::Display { var_name, style } => {
@@ -356,7 +475,7 @@ fn render_widget(
             if value.is_empty() {
                 ui.label(egui::RichText::new("(empty)").italics().weak());
             } else {
-                ui.label(make_text(&value, style));
+                render_label(ui, &value, style);
             }
         }
 
@@ -440,8 +559,8 @@ fn render_widget(
             };
 
             if response.clicked() {
-                if let Some(fn_name) = on_click {
-                    pending.push(fn_name.clone());
+                if let Some(action) = on_click {
+                    pending.push(action.clone());
                 }
             }
         }
@@ -511,7 +630,13 @@ fn render_widget(
             ui.separator();
         }
         Widget::Heading(text, style) => {
-            ui.heading(make_text(text, style));
+            if is_rtl(text) {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                    ui.heading(make_text(text, style));
+                });
+            } else {
+                ui.heading(make_text(text, style));
+            }
         }
         Widget::Spacer => {
             ui.add_space(8.0);
@@ -521,7 +646,7 @@ fn render_widget(
 
 pub fn run_ui(program: &Program, ui: &UiDecl) -> Result<(), eframe::Error> {
     let app = AecApp::new(program.clone(), ui.clone()).map_err(|e| {
-        eframe::Error::AppCreation(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))
+        eframe::Error::AppCreation(Box::new(std::io::Error::other(e)))
     })?;
 
     let title = ui.screen.title.clone();
@@ -533,4 +658,88 @@ pub fn run_ui(program: &Program, ui: &UiDecl) -> Result<(), eframe::Error> {
     };
 
     eframe::run_native(&title, options, Box::new(|_cc| Ok(Box::new(app))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conditional_state_is_synced_when_branch_appears_and_survives_rebuild() {
+        let program = aec_parser::parse(
+            "agent Test\nfn reveal() {\n    visible = true\n}\nfn update() {\n    detail = \"updated\"\n}\nui Main = Screen \"Test\" {\n    @visible: bool = false\n    if visible {\n        @detail: string = \"initial\"\n        Text detail\n    }\n}\n",
+        ).unwrap();
+        let ui = program.items.iter().find_map(|item| match item {
+            TopLevelItem::Ui(ui) => Some(ui.clone()),
+            _ => None,
+        }).unwrap();
+        let mut app = AecApp::new(program, ui).unwrap();
+        assert!(app.state_var_names.contains("detail"));
+        assert!(app.state.get_value("detail").is_none());
+
+        app.execute_event("reveal");
+        assert!(matches!(app.state.get_value("visible"), Some(UiValue::Bool(true))));
+        assert!(matches!(app.state.get_value("detail"), Some(UiValue::String(text)) if text == "initial"));
+
+        app.execute_event("update");
+        assert!(matches!(app.state.get_value("detail"), Some(UiValue::String(text)) if text == "updated"));
+    }
+
+    #[test]
+    fn qualified_public_component_is_rendered() {
+        let library = aec_parser::parse(
+            "agent Library\npub component Panel {\n    render {\n        Text \"from module\"\n    }\n}\n",
+        )
+        .unwrap();
+        let mut program = aec_parser::parse(
+            "agent Main\nui Main = Screen \"Main\" {\n    lib.Panel\n}\n",
+        )
+        .unwrap();
+        let start = program.items.len();
+        let module_count = library.items.len();
+        program.items.extend(library.items);
+        program.item_modules.resize(start, None);
+        program
+            .item_modules
+            .extend((0..module_count).map(|_| Some("lib".to_string())));
+        let ui = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                TopLevelItem::Ui(ui) => Some(ui.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let app = AecApp::new(program, ui).unwrap();
+        assert!(matches!(
+            &app.widgets[0],
+            Widget::Container(children)
+                if matches!(&children[0], Widget::Text(text, _) if text == "from module")
+        ));
+    }
+
+    #[test]
+    fn parse_color_rejects_non_ascii_without_panicking() {
+        assert!(parse_color("€abc").is_none());
+        assert!(parse_color("12xz56").is_none());
+    }
+
+    #[test]
+    fn chatbot_event_adds_messages_and_clears_draft() {
+        let program = aec_parser::parse(include_str!("../../../examples/chatbot.aec")).unwrap();
+        let ui = program.items.iter().find_map(|item| match item {
+            TopLevelItem::Ui(ui) => Some(ui.clone()),
+            _ => None,
+        }).unwrap();
+        let mut app = AecApp::new(program, ui).unwrap();
+        app.state.set_string("draft", "Hello".to_string());
+
+        app.execute_event("send_message");
+
+        assert_eq!(app.state.get_string("draft"), "");
+        let messages = app.state.get_value("messages").unwrap().as_array();
+        assert_eq!(messages.len(), 2);
+        assert!(matches!(&messages[0], UiValue::Object(message) if matches!(message.get("content"), Some(UiValue::String(text)) if text == "Hello")));
+        assert!(matches!(&messages[1], UiValue::Object(message) if matches!(message.get("content"), Some(UiValue::String(text)) if text == "Echo: Hello")));
+    }
 }

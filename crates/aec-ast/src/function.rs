@@ -6,10 +6,19 @@ use crate::span::Span;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDecl {
+    pub is_public: bool,
     pub name: Identifier,
     pub params: Vec<Parameter>,
     pub return_type: Option<TypeExpr>,
     pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeAliasDecl {
+    pub is_public: bool,
+    pub name: Identifier,
+    pub target: TypeExpr,
     pub span: Span,
 }
 

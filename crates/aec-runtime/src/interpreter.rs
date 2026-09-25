@@ -6,11 +6,11 @@ use crate::memory::Memory;
 use crate::permissions::{Limits, Permissions};
 use crate::value::{Closure, Env, Environment, Function, Value};
 use aec_ast::{
-    AssignOp, BinaryOp, Block, ElseBranch, Expr, ForStmt, FunctionDecl,
+    AssignOp, BinaryOp, Block, ElseBranch, Expr, ForStmt, FunctionDecl, ModelDecl,
     IfStmt, LValue, LValueStep, MatchBody, Pattern, Program, Statement, UnaryOp,
     WhileStmt,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 pub struct Interpreter {
@@ -19,6 +19,12 @@ pub struct Interpreter {
     /// Permission policy. `None` = the program has no `permissions` block → no gate is applied.
     pub permissions: Option<Permissions>,
     pub limits: Limits,
+    module_envs: HashMap<String, Env>,
+    module_env_ids: HashMap<usize, String>,
+    models: HashMap<String, ModelDecl>,
+    module_models: HashMap<String, ModelDecl>,
+    module_secrets: HashMap<String, HashMap<String, String>>,
+    secrets: HashMap<String, String>,
 }
 
 impl Interpreter {
@@ -29,13 +35,86 @@ impl Interpreter {
             memory: Memory::new(),
             permissions: None,
             limits: Limits::default(),
+            module_envs: HashMap::new(),
+            module_env_ids: HashMap::new(),
+            models: HashMap::new(),
+            module_models: HashMap::new(),
+            module_secrets: HashMap::new(),
+            secrets: HashMap::new(),
         }
     }
 
     pub fn run(&mut self, program: &Program) -> Result<(), RuntimeError> {
-        for item in &program.items {
+        self.global = Environment::new();
+        self.memory = Memory::new();
+        self.permissions = None;
+        self.limits = Limits::default();
+        self.module_envs.clear();
+        self.module_env_ids.clear();
+        self.models.clear();
+        self.module_models.clear();
+        self.module_secrets.clear();
+        self.secrets.clear();
+
+        let mut scopes: Vec<String> = program
+            .item_modules
+            .iter()
+            .filter_map(|module| module.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        scopes.sort_by_key(|scope| scope.matches('.').count());
+        for scope in scopes {
+            let parent = scope
+                .rsplit_once('.')
+                .and_then(|(parent, _)| self.module_envs.get(parent).cloned())
+                .unwrap_or_else(|| self.global.clone());
+            let env = Environment::with_parent(parent);
+            self.module_env_ids
+                .insert(Rc::as_ptr(&env) as usize, scope.clone());
+            self.module_envs.insert(scope, env);
+        }
+
+        for (index, item) in program.items.iter().enumerate() {
+            let module = program.item_modules.get(index).cloned().flatten();
+            let env = module
+                .as_deref()
+                .and_then(|scope| self.module_envs.get(scope).cloned())
+                .unwrap_or_else(|| self.global.clone());
             match item {
-                aec_ast::TopLevelItem::Function(f) => self.register_function(f),
+                aec_ast::TopLevelItem::Function(f) => {
+                    self.register_function_in_env(f, module.as_deref(), env);
+                }
+                aec_ast::TopLevelItem::Model(model) => {
+                    if let Some(scope) = module.as_deref() {
+                        self.module_models
+                            .insert(format!("{}::{}", scope, model.name.name), model.clone());
+                        if model.is_public {
+                            self.models
+                                .insert(format!("{}.{}", scope, model.name.name), model.clone());
+                        }
+                    } else {
+                        self.models.insert(model.name.name.clone(), model.clone());
+                    }
+                }
+                aec_ast::TopLevelItem::Secrets(secrets) => {
+                    let values = if let Some(scope) = module.as_deref() {
+                        self.module_secrets
+                            .entry(scope.to_string())
+                            .or_default()
+                    } else {
+                        &mut self.secrets
+                    };
+                    for entry in &secrets.entries {
+                        let value = match &entry.value {
+                            aec_ast::SecretValue::String(value) => value.clone(),
+                            aec_ast::SecretValue::Env(name) => {
+                                std::env::var(name).unwrap_or_default()
+                            }
+                        };
+                        values.insert(entry.name.name.clone(), value);
+                    }
+                }
                 aec_ast::TopLevelItem::Permissions(block) => {
                     self.permissions = Some(Permissions::from_block(block));
                 }
@@ -48,17 +127,120 @@ impl Interpreter {
         Ok(())
     }
 
-    fn register_function(&mut self, f: &FunctionDecl) {
+    fn register_function_in_env(
+        &mut self,
+        f: &FunctionDecl,
+        module: Option<&str>,
+        env: Env,
+    ) {
         let params = f.params.iter().map(|p| p.name.name.clone()).collect();
-        let func = Function {
+        let param_defaults = f.params.iter().map(|p| p.default.clone()).collect();
+        let function = Rc::new(Function {
             name: f.name.name.clone(),
             params,
+            param_defaults,
             body: f.body.clone(),
-            env: self.global.clone(),
+            env: env.clone(),
+        });
+        env.borrow_mut()
+            .set(f.name.name.clone(), Value::Function(function.clone()));
+        if let Some(scope) = module {
+            if f.is_public {
+                self.global.borrow_mut().set(
+                    format!("{}.{}", scope, f.name.name),
+                    Value::Function(function),
+                );
+            }
+        } else {
+            self.global
+                .borrow_mut()
+                .set(f.name.name.clone(), Value::Function(function));
+        }
+    }
+
+    fn module_for_env(&self, env: &Env) -> Option<&str> {
+        let mut current = Some(env.clone());
+        while let Some(candidate) = current {
+            let key = Rc::as_ptr(&candidate) as usize;
+            if let Some(module) = self.module_env_ids.get(&key) {
+                return Some(module.as_str());
+            }
+            current = candidate.borrow().parent.clone();
+        }
+        None
+    }
+
+    fn resolve_model(&self, name: &str, env: Option<&Env>) -> Option<(String, ModelDecl)> {
+        if let Some(env) = env {
+            if let Some(module) = self.module_for_env(env) {
+                let public_key = format!("{}.{}", module, name);
+                if let Some(model) = self.models.get(&public_key) {
+                    return Some((public_key, model.clone()));
+                }
+                let key = format!("{}::{}", module, name);
+                if let Some(model) = self.module_models.get(&key) {
+                    return Some((key, model.clone()));
+                }
+            }
+        }
+        self.models
+            .get(name)
+            .cloned()
+            .map(|model| (name.to_string(), model))
+    }
+
+    fn resolve_secret(&self, name: &str, env: Option<&Env>) -> Option<String> {
+        env.and_then(|env| self.module_for_env(env))
+            .and_then(|module| self.module_secrets.get(module))
+            .and_then(|secrets| secrets.get(name).cloned())
+            .or_else(|| self.secrets.get(name).cloned())
+    }
+
+    fn call_secrets_get(
+        &mut self,
+        args: &[(Option<String>, Value)],
+        span: aec_ast::Span,
+        env: Option<&Env>,
+    ) -> Result<Value, RuntimeError> {
+        if args.len() != 1 {
+            return Err(RuntimeError::WrongArgCount {
+                expected: 1,
+                got: args.len(),
+                span,
+            });
+        }
+        if self.permissions.is_some() {
+            return Err(crate::permissions::denied(
+                "secret access is not available when permissions are declared".to_string(),
+                span,
+            ));
+        }
+        let name = match args.first().map(|(_, value)| value) {
+            Some(Value::String(value)) => value.clone(),
+            _ => {
+                return Err(RuntimeError::TypeError {
+                    message: "secrets.get needs a string".to_string(),
+                    span,
+                })
+            }
         };
-        self.global
-            .borrow_mut()
-            .set(f.name.name.clone(), Value::Function(Rc::new(func)));
+        Ok(self
+            .resolve_secret(&name, env)
+            .map(Value::String)
+            .unwrap_or(Value::None))
+    }
+
+    fn expression_path(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Identifier(identifier) => Some(identifier.name.clone()),
+            Expr::Member(member) => {
+                let mut path = Self::expression_path(&member.object)?;
+                path.push('.');
+                path.push_str(&member.property.name);
+                Some(path)
+            }
+            _ => None,
+        }
     }
 
     pub fn call_function(
@@ -67,49 +249,245 @@ impl Interpreter {
         args: Vec<Value>,
         span: aec_ast::Span,
     ) -> Result<Value, RuntimeError> {
-        if let Some(result) = self.try_builtin(name, &args, span)? {
-            return Ok(result);
+        let args = args.into_iter().map(|value| (None, value)).collect::<Vec<_>>();
+        self.call_function_values(name, &args, span)
+    }
+
+    pub fn call_function_with_arguments(
+        &mut self,
+        name: &str,
+        args: &[aec_ast::Argument],
+        span: aec_ast::Span,
+    ) -> Result<Value, RuntimeError> {
+        let mut values = Vec::with_capacity(args.len());
+        for argument in args {
+            values.push((
+                argument.name.as_ref().map(|name| name.name.clone()),
+                self.eval_expr(&argument.value, self.global.clone())?,
+            ));
+        }
+        self.call_function_values(name, &values, span)
+    }
+
+    fn call_function_values(
+        &mut self,
+        name: &str,
+        args: &[(Option<String>, Value)],
+        span: aec_ast::Span,
+    ) -> Result<Value, RuntimeError> {
+        let effective_name = name.to_string();
+        if let Some((namespace, method)) = effective_name.rsplit_once('.') {
+            if method == "think" || method == "complete" {
+                if let Some((model_name, model)) = self.resolve_model(namespace, None) {
+                    return self.call_model(&model_name, model, args, span);
+                }
+            }
+            if namespace == "secrets" && method == "get" {
+                if args.len() != 1 {
+                    return Err(RuntimeError::WrongArgCount {
+                        expected: 1,
+                        got: args.len(),
+                        span,
+                    });
+                }
+                if self.permissions.is_some() {
+                    return Err(crate::permissions::denied(
+                        "secret access is not available when permissions are declared".to_string(),
+                        span,
+                    ));
+                }
+                let name = match args.first().map(|(_, value)| value) {
+                    Some(Value::String(value)) => value.clone(),
+                    _ => {
+                        return Err(RuntimeError::TypeError {
+                            message: "secrets.get needs a string".to_string(),
+                            span,
+                        })
+                    }
+                };
+                return Ok(self
+                    .secrets
+                    .get(&name)
+                    .cloned()
+                    .map(Value::String)
+                    .unwrap_or(Value::None));
+            }
+        }
+        let bound = {
+            let environment = self.global.borrow();
+            environment.get(&effective_name)
+        };
+        if let Some(value) = bound {
+            match value {
+                Value::Function(function) => return self.invoke_function(function, args, span),
+                Value::Closure(closure) => return self.call_closure_values(closure, args, span),
+                other => {
+                    return Err(RuntimeError::TypeError {
+                        message: format!("'{}' is not a function (got {})", effective_name, other.type_name()),
+                        span,
+                    });
+                }
+            }
         }
 
-        let func_val = self
-            .global
-            .borrow()
-            .get(name)
-            .ok_or_else(|| RuntimeError::UndefinedFunction {
-                name: name.to_string(),
-                span,
-            })?;
-
-        let func = match func_val {
-            Value::Function(f) => f,
-            _ => {
-                return Err(RuntimeError::TypeError {
-                    message: format!("'{}' is not a function", name),
-                    span,
-                })
-            }
-        };
-
-        if args.len() != func.params.len() {
-            return Err(RuntimeError::WrongArgCount {
-                expected: func.params.len(),
-                got: args.len(),
+        if args.iter().any(|(argument_name, _)| argument_name.is_some()) {
+            return Err(RuntimeError::Generic {
+                message: format!("named arguments are not supported by builtin '{}'", effective_name),
                 span,
             });
         }
-
-        let local_env = Environment::with_parent(func.env.clone());
-        for (param, arg) in func.params.iter().zip(args) {
-            local_env.borrow_mut().set(param.clone(), arg);
+        let positional = args.iter().map(|(_, value)| value.clone()).collect::<Vec<_>>();
+        if let Some(result) = self.try_builtin(&effective_name, &positional, span)? {
+            return Ok(result);
         }
 
-        match self.exec_block(&func.body, local_env) {
+        Err(RuntimeError::UndefinedFunction {
+            name: name.to_string(),
+            span,
+        })
+    }
+
+    fn invoke_function(
+        &mut self,
+        function: Rc<Function>,
+        args: &[(Option<String>, Value)],
+        span: aec_ast::Span,
+    ) -> Result<Value, RuntimeError> {
+        let local_env = Environment::with_parent(function.env.clone());
+        let values = self.bind_function_args(&function, args, local_env.clone(), span)?;
+        for (param, value) in function.params.iter().zip(values) {
+            local_env.borrow_mut().set(param.clone(), value);
+        }
+
+        match self.exec_block(&function.body, local_env) {
             Ok(Flow::Normal(v)) | Ok(Flow::Return(v)) => Ok(v),
-            // `?` met an `err(...)`: the function returns that error (wrapped back
-            // into a result) to its caller.
             Err(RuntimeError::EarlyReturn { value }) => Ok(Value::Result(Err(value))),
             Err(e) => Err(e),
         }
+    }
+
+    fn bind_function_args(
+        &mut self,
+        function: &Function,
+        args: &[(Option<String>, Value)],
+        local_env: Env,
+        span: aec_ast::Span,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        let mut slots = vec![None; function.params.len()];
+        let mut next_positional = 0;
+        let mut named_seen = false;
+        for (name, value) in args {
+            if let Some(name) = name {
+                named_seen = true;
+                let Some(index) = function.params.iter().position(|param| param == name) else {
+                    return Err(RuntimeError::Generic {
+                        message: format!("unknown argument '{}' for function '{}',", name, function.name),
+                        span,
+                    });
+                };
+                if slots[index].is_some() {
+                    return Err(RuntimeError::Generic {
+                        message: format!("argument '{}' was provided more than once", name),
+                        span,
+                    });
+                }
+                slots[index] = Some(value.clone());
+            } else {
+                if named_seen {
+                    return Err(RuntimeError::Generic {
+                        message: "positional arguments cannot follow named arguments".to_string(),
+                        span,
+                    });
+                }
+                if next_positional >= slots.len() {
+                    return Err(RuntimeError::WrongArgCount {
+                        expected: slots.len(),
+                        got: args.len(),
+                        span,
+                    });
+                }
+                slots[next_positional] = Some(value.clone());
+                next_positional += 1;
+            }
+        }
+
+        let mut values = Vec::with_capacity(slots.len());
+        for (index, slot) in slots.into_iter().enumerate() {
+            if let Some(value) = slot {
+                values.push(value);
+                continue;
+            }
+            let Some(default) = function.param_defaults.get(index).and_then(|value| value.clone())
+            else {
+                let expected = function
+                    .params
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| {
+                        function
+                            .param_defaults
+                            .get(*index)
+                            .and_then(|default| default.as_ref())
+                            .is_none()
+                    })
+                    .count();
+                return Err(RuntimeError::WrongArgCount {
+                    expected,
+                    got: args.len(),
+                    span,
+                });
+            };
+            values.push(self.eval_expr(&default, local_env.clone())?);
+        }
+        Ok(values)
+    }
+
+    fn call_closure_values(
+        &mut self,
+        closure: Rc<Closure>,
+        args: &[(Option<String>, Value)],
+        span: aec_ast::Span,
+    ) -> Result<Value, RuntimeError> {
+        let mut slots = vec![None; closure.params.len()];
+        let mut next_positional = 0;
+        for (name, value) in args {
+            if let Some(name) = name {
+                let Some(index) = closure.params.iter().position(|param| param == name) else {
+                    return Err(RuntimeError::Generic {
+                        message: format!("unknown argument '{}' for lambda", name),
+                        span,
+                    });
+                };
+                if slots[index].is_some() {
+                    return Err(RuntimeError::Generic {
+                        message: format!("argument '{}' was provided more than once", name),
+                        span,
+                    });
+                }
+                slots[index] = Some(value.clone());
+            } else {
+                if next_positional >= slots.len() {
+                    return Err(RuntimeError::WrongArgCount {
+                        expected: slots.len(),
+                        got: args.len(),
+                        span,
+                    });
+                }
+                slots[next_positional] = Some(value.clone());
+                next_positional += 1;
+            }
+        }
+        let values = slots
+            .into_iter()
+            .map(|value| {
+                value.ok_or_else(|| RuntimeError::WrongArgCount {
+                    expected: closure.params.len(),
+                    got: args.len(),
+                    span,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.call_closure(closure, values, span)
     }
 
     fn try_builtin(
@@ -118,6 +496,7 @@ impl Interpreter {
         args: &[Value],
         span: aec_ast::Span,
     ) -> Result<Option<Value>, RuntimeError> {
+        crate::stdlib::validate_builtin_args(name, args, span)?;
         // Permission gate: if the program declared a `permissions` block, every builtin
         // is checked against the allowlist before it runs. Unknown names (user
         // functions) pass through untouched.
@@ -128,13 +507,14 @@ impl Interpreter {
         }
 
         // check stdlib first
-        if let Some(v) = crate::stdlib::call_builtin(name, args, span, &self.limits)? {
+        let restricted = self.permissions.is_some();
+        if let Some(v) = crate::stdlib::call_builtin(name, args, span, &self.limits, restricted)? {
             return Ok(Some(v));
         }
         if let Some(v) = crate::stdlib::call_builtin2(name, args, span)? {
             return Ok(Some(v));
         }
-        if let Some(v) = crate::stdlib_extended::call_extended(name, args, span, &self.limits)? {
+        if let Some(v) = crate::stdlib_extended::call_extended(name, args, span, &self.limits, restricted)? {
             return Ok(Some(v));
         }
         // then the internal built-ins
@@ -185,6 +565,13 @@ impl Interpreter {
                         span,
                     }),
                 }
+            }
+            "bool" => {
+                require_args(args, 1, span)?;
+                Value::Bool(match &args[0] {
+                    Value::String(value) => value.eq_ignore_ascii_case("true"),
+                    other => other.is_truthy(),
+                })
             }
             "str" => {
                 if args.len() != 1 {
@@ -308,13 +695,72 @@ impl Interpreter {
                     new_arr.pop().unwrap_or(Value::None)
                 }
                 v => return Err(RuntimeError::TypeError {
-                    message: format!("pop() needs array, got {}", v.type_name()),
+                    message: format!("pop() doesn't work on {}", v.type_name()),
                     span,
                 }),
             },
+            "map" => {
+                let (Value::Array(values), Value::Closure(function)) = (&args[0], &args[1]) else {
+                    return Err(RuntimeError::TypeError {
+                        message: "map() needs an array and a function".to_string(),
+                        span,
+                    });
+                };
+                let mut result = Vec::with_capacity(values.len());
+                for value in values {
+                    result.push(self.call_closure(function.clone(), vec![value.clone()], span)?);
+                }
+                Value::Array(result)
+            }
+            "filter" => {
+                let (Value::Array(values), Value::Closure(function)) = (&args[0], &args[1]) else {
+                    return Err(RuntimeError::TypeError {
+                        message: "filter() needs an array and a function".to_string(),
+                        span,
+                    });
+                };
+                let mut result = Vec::new();
+                for value in values {
+                    let keep = self.call_closure(function.clone(), vec![value.clone()], span)?;
+                    if keep.is_truthy() {
+                        result.push(value.clone());
+                    }
+                }
+                Value::Array(result)
+            }
+            "reduce" => {
+                let (Value::Array(values), Value::Closure(function)) = (&args[0], &args[1]) else {
+                    return Err(RuntimeError::TypeError {
+                        message: "reduce() needs an array and a function".to_string(),
+                        span,
+                    });
+                };
+                let mut accumulator = args[2].clone();
+                for value in values {
+                    accumulator = self.call_closure(
+                        function.clone(),
+                        vec![accumulator, value.clone()],
+                        span,
+                    )?;
+                }
+                accumulator
+            }
             "range" => match args.len() {
+
                 1 => match &args[0] {
                     Value::Int(n) => {
+                        if *n < 0 {
+                            return Err(RuntimeError::Generic {
+                                message: "range() end must be non-negative".to_string(),
+                                span,
+                            });
+                        }
+                        if *n > 10_000_000 {
+                            return Err(RuntimeError::Generic {
+                                message: "range() result is too large".to_string(),
+                                span,
+                            });
+                        }
                         let items: Vec<Value> = (0..*n).map(Value::Int).collect();
                         Value::Array(items)
                     }
@@ -325,6 +771,18 @@ impl Interpreter {
                 },
                 2 => match (&args[0], &args[1]) {
                     (Value::Int(start), Value::Int(end)) => {
+                        if *start < 0 || *end < *start {
+                            return Err(RuntimeError::Generic {
+                                message: "range() requires 0 <= start <= end".to_string(),
+                                span,
+                            });
+                        }
+                        if (*end - *start) > 10_000_000 {
+                            return Err(RuntimeError::Generic {
+                                message: "range() result is too large".to_string(),
+                                span,
+                            });
+                        }
                         let items: Vec<Value> = (*start..*end).map(Value::Int).collect();
                         Value::Array(items)
                     }
@@ -340,7 +798,10 @@ impl Interpreter {
                 }),
             },
             "abs" => match &args[0] {
-                Value::Int(n) => Value::Int(n.abs()),
+                Value::Int(n) => Value::Int(n.checked_abs().ok_or_else(|| RuntimeError::Generic {
+                    message: "integer overflow in abs()".to_string(),
+                    span,
+                })?),
                 Value::Float(f) => Value::Float(f.abs()),
                 v => return Err(RuntimeError::TypeError {
                     message: format!("abs() needs number, got {}", v.type_name()),
@@ -372,7 +833,22 @@ impl Interpreter {
                 }),
             },
             "pow" => match (&args[0], &args[1]) {
-                (Value::Int(a), Value::Int(b)) => Value::Int(a.pow(*b as u32)),
+                (Value::Int(a), Value::Int(b)) => {
+                    if *b < 0 {
+                        return Err(RuntimeError::Generic {
+                            message: "pow() does not accept a negative integer exponent".to_string(),
+                            span,
+                        });
+                    }
+                    let exponent = u32::try_from(*b).map_err(|_| RuntimeError::Generic {
+                        message: "pow() exponent is too large".to_string(),
+                        span,
+                    })?;
+                    Value::Int(a.checked_pow(exponent).ok_or_else(|| RuntimeError::Generic {
+                        message: "integer overflow in pow()".to_string(),
+                        span,
+                    })?)
+                }
                 (Value::Float(a), Value::Float(b)) => Value::Float(a.powf(*b)),
                 _ => return Err(RuntimeError::TypeError {
                     message: "pow() needs two numbers".to_string(),
@@ -407,7 +883,7 @@ impl Interpreter {
                 }),
             },
             "llm.complete" | "llm_complete" => {
-                return llm::llm_complete(args, span).map(Some);
+                return llm::llm_complete(args, span, restricted, &self.limits).map(Some);
             }
             "push_to" => {
                 if args.len() != 2 {
@@ -538,6 +1014,84 @@ impl Interpreter {
             _ => return Ok(None),
         };
         Ok(Some(result))
+    }
+
+    fn call_model(
+        &mut self,
+        name: &str,
+        model: ModelDecl,
+        args: &[(Option<String>, Value)],
+        span: aec_ast::Span,
+    ) -> Result<Value, RuntimeError> {
+        if args.len() != 1 {
+            return Err(RuntimeError::WrongArgCount {
+                expected: 1,
+                got: args.len(),
+                span,
+            });
+        }
+        let mut options = HashMap::new();
+        for field in &model.fields {
+            if let aec_ast::ModelField::Property(property) = field {
+                let key = match property.name.name.as_str() {
+                    "name" => "model",
+                    "endpoint" => "base_url",
+                    other => other,
+                };
+                options.insert(key.to_string(), literal_value(&property.value));
+            }
+        }
+        for (argument_name, value) in args {
+            match argument_name.as_deref() {
+                Some("prompt") | Some("message") => {
+                    options.insert("prompt".to_string(), value.clone());
+                }
+                None => {
+                    if let Value::Object(values) = value {
+                        options.extend(values.clone());
+                    } else {
+                        options.insert("prompt".to_string(), value.clone());
+                    }
+                }
+                Some(key) => {
+                    options.insert(key.to_string(), value.clone());
+                }
+            }
+        }
+        if !options.contains_key("prompt") {
+            return Err(RuntimeError::TypeError {
+                message: format!("model '{}' needs a prompt", name),
+                span,
+            });
+        }
+        if let Some(permissions) = &self.permissions {
+            permissions
+                .check_builtin("llm.complete", &[Value::Object(options.clone())])
+                .map_err(|message| crate::permissions::denied(message, span))?;
+        }
+        let restricted = self.permissions.is_some();
+        llm::llm_complete(
+            &[Value::Object(options)],
+            span,
+            restricted,
+            &self.limits,
+        )
+    }
+
+    fn call_value(
+        &mut self,
+        value: &Value,
+        args: &[(Option<String>, Value)],
+        span: aec_ast::Span,
+    ) -> Result<Value, RuntimeError> {
+        match value {
+            Value::Function(function) => self.invoke_function(function.clone(), args, span),
+            Value::Closure(closure) => self.call_closure_values(closure.clone(), args, span),
+            other => Err(RuntimeError::TypeError {
+                message: format!("value of type {} is not callable", other.type_name()),
+                span,
+            }),
+        }
     }
 
     /// Calls a lambda value with the given arguments.
@@ -740,10 +1294,95 @@ impl Interpreter {
             }
             return Ok(());
         }
-        Err(RuntimeError::Generic {
-            message: "nested assignment not yet fully implemented".to_string(),
-            span: lv.span,
-        })
+
+        let mut root = env
+            .borrow()
+            .get(&lv.base.name)
+            .ok_or_else(|| RuntimeError::UndefinedVariable {
+                name: lv.base.name.clone(),
+                span: lv.span,
+            })?;
+        self.assign_path(&mut root, &lv.path, env.clone(), lv.span, value)?;
+        if !env.borrow_mut().assign(&lv.base.name, root) {
+            return Err(RuntimeError::UndefinedVariable {
+                name: lv.base.name.clone(),
+                span: lv.span,
+            });
+        }
+        Ok(())
+    }
+
+    fn assign_path(
+        &mut self,
+        current: &mut Value,
+        path: &[LValueStep],
+        env: Env,
+        span: aec_ast::Span,
+        value: Value,
+    ) -> Result<(), RuntimeError> {
+        let Some((step, rest)) = path.split_first() else {
+            *current = value;
+            return Ok(());
+        };
+
+        match step {
+            LValueStep::Member(id) => {
+                let Value::Object(object) = current else {
+                    return Err(RuntimeError::TypeError {
+                        message: format!("can't assign .{} on {}", id.name, current.type_name()),
+                        span,
+                    });
+                };
+                if rest.is_empty() {
+                    object.insert(id.name.clone(), value);
+                    return Ok(());
+                }
+                let child = object.get_mut(&id.name).ok_or_else(|| RuntimeError::Generic {
+                    message: format!("no field '{}'", id.name),
+                    span,
+                })?;
+                self.assign_path(child, rest, env, span, value)
+            }
+            LValueStep::Index(index_expr) => {
+                let index = self.eval_expr(index_expr, env.clone())?;
+                match (current, index) {
+                    (Value::Array(array), Value::Int(index)) => {
+                        let index = if index < 0 {
+                            array.len() as i64 + index
+                        } else {
+                            index
+                        };
+                        if index < 0 || index as usize >= array.len() {
+                            return Err(RuntimeError::Generic {
+                                message: format!("index out of bounds: {}", index),
+                                span,
+                            });
+                        }
+                        if rest.is_empty() {
+                            array[index as usize] = value;
+                            return Ok(());
+                        }
+                        let child = &mut array[index as usize];
+                        self.assign_path(child, rest, env, span, value)
+                    }
+                    (Value::Object(object), Value::String(key)) => {
+                        if rest.is_empty() {
+                            object.insert(key, value);
+                            return Ok(());
+                        }
+                        let child = object.get_mut(&key).ok_or_else(|| RuntimeError::Generic {
+                            message: format!("no key '{}'", key),
+                            span,
+                        })?;
+                        self.assign_path(child, rest, env, span, value)
+                    }
+                    (value, _) => Err(RuntimeError::TypeError {
+                        message: format!("can't index {}", value.type_name()),
+                        span,
+                    }),
+                }
+            }
+        }
     }
 
     fn navigate_lvalue(
@@ -837,7 +1476,10 @@ impl Interpreter {
                 let operand = self.eval_expr(&u.operand, env)?;
                 match u.op {
                     UnaryOp::Neg => match operand {
-                        Value::Int(n) => Ok(Value::Int(-n)),
+                        Value::Int(n) => n.checked_neg().map(Value::Int).ok_or_else(|| RuntimeError::Generic {
+                            message: "integer overflow in unary -".to_string(),
+                            span: u.span,
+                        }),
                         Value::Float(f) => Ok(Value::Float(-f)),
                         v => Err(RuntimeError::TypeError {
                             message: format!("can't negate {}", v.type_name()),
@@ -848,41 +1490,104 @@ impl Interpreter {
                 }
             }
             Expr::Call(call) => {
-                let mut args = Vec::new();
-                for arg in &call.args {
-                    args.push(self.eval_expr(&arg.value, env.clone())?);
+                let mut args = Vec::with_capacity(call.args.len());
+                for argument in &call.args {
+                    args.push((
+                        argument.name.as_ref().map(|name| name.name.clone()),
+                        self.eval_expr(&argument.value, env.clone())?,
+                    ));
                 }
 
-                // A name bound to a lambda is called through its value. Everything
-                // else (builtins, global `fn`s, namespaces) resolves by name.
                 if let Expr::Identifier(id) = &call.callee {
-                    let callee = env.borrow().get(&id.name);
-                    if let Some(Value::Closure(closure)) = callee {
-                        return self.call_closure(closure, args, call.span);
+                    let value = {
+                        let environment = env.borrow();
+                        environment.get(&id.name)
+                    };
+                    if let Some(value) = value {
+                        return self.call_value(&value, &args, call.span);
+                    }
+                    return self.call_function_values(&id.name, &args, call.span);
+                }
+
+                if let Some(path) = Self::expression_path(&call.callee) {
+                    if path == "secrets.get" {
+                        return self.call_secrets_get(&args, call.span, Some(&env));
+                    }
+                    if let Some((model_name, method)) = path.rsplit_once('.') {
+                        if method == "think" || method == "complete" {
+                            if let Some((model_key, model)) =
+                                self.resolve_model(model_name, Some(&env))
+                            {
+                                return self.call_model(&model_key, model, &args, call.span);
+                            }
+                        }
                     }
                 }
 
-                let callee_name = match &call.callee {
-                    Expr::Identifier(id) => id.name.clone(),
-                    Expr::Member(m) => match &m.object {
-                        Expr::Identifier(id) => format!("{}.{}", id.name, m.property.name),
-                        _ => {
-                            return Err(RuntimeError::Generic {
-                                message: "complex method calls not yet supported".to_string(),
-                                span: call.span,
-                            })
-                        }
-                    },
-                    _ => {
-                        return Err(RuntimeError::Generic {
-                            message: "only simple function calls supported".to_string(),
-                            span: call.span,
-                        })
+                if let Expr::Member(member) = &call.callee {
+                    if let Expr::Identifier(namespace) = &member.object {
+                        let name = format!("{}.{}", namespace.name, member.property.name);
+                        let effective_name = self
+                            .module_for_env(&env)
+                            .map(|module| format!("{}.{}", module, name))
+                            .filter(|candidate| self.global.borrow().get(candidate).is_some())
+                            .unwrap_or(name);
+                        return self.call_function_values(&effective_name, &args, call.span);
                     }
-                };
-                self.call_function(&callee_name, args, call.span)
+                    let object = self.eval_expr(&member.object, env.clone())?;
+                    if let Value::Object(fields) = object {
+                        if let Some(value) = fields.get(&member.property.name) {
+                            return self.call_value(value, &args, call.span);
+                        }
+                    }
+                    return Err(RuntimeError::Generic {
+                        message: format!("no callable field '{}'", member.property.name),
+                        span: call.span,
+                    });
+                }
+
+                let callee = self.eval_expr(&call.callee, env)?;
+                self.call_value(&callee, &args, call.span)
             }
             Expr::Member(m) => {
+                if let Some(path) = Self::expression_path(&Expr::Member(m.clone())) {
+                    if let Some((model_name, field_name)) = path.rsplit_once('.') {
+                        if let Some((_, model)) = self.resolve_model(model_name, Some(&env)) {
+                            let mut fields = HashMap::new();
+                            for field in &model.fields {
+                                if let aec_ast::ModelField::Property(property) = field {
+                                    fields.insert(
+                                        property.name.name.clone(),
+                                        literal_value(&property.value),
+                                    );
+                                }
+                            }
+                            return fields.get(field_name).cloned().ok_or_else(|| {
+                                RuntimeError::Generic {
+                                    message: format!("no model field '{}'", field_name),
+                                    span: m.span,
+                                }
+                            });
+                        }
+                    }
+                }
+                if let Expr::Identifier(identifier) = &m.object {
+                    if identifier.name == "secrets" {
+                        if self.permissions.is_some() {
+                            return Err(crate::permissions::denied(
+                                "secret access is not available when permissions are declared".to_string(),
+                                m.span,
+                            ));
+                        }
+                        return self
+                            .resolve_secret(&m.property.name, Some(&env))
+                            .map(Value::String)
+                            .ok_or_else(|| RuntimeError::Generic {
+                                message: format!("unknown secret '{}'", m.property.name),
+                                span: m.span,
+                            });
+                    }
+                }
                 let obj = self.eval_expr(&m.object, env)?;
                 match obj {
                     Value::Object(o) => o.get(&m.property.name).cloned().ok_or_else(|| {
@@ -936,7 +1641,10 @@ impl Interpreter {
                     }),
                 }
             }
-            Expr::Await(a) => self.eval_expr(&a.inner, env),
+            Expr::Await(a) => Err(RuntimeError::Generic {
+                message: "await is not supported by the synchronous interpreter".to_string(),
+                span: a.span,
+            }),
             Expr::Lambda(l) => Ok(Value::Closure(Rc::new(Closure {
                 params: l.params.iter().map(|p| p.name.clone()).collect(),
                 body: l.body.clone(),
@@ -967,43 +1675,66 @@ impl Interpreter {
         let scrutinee = self.eval_expr(&m.scrutinee, env.clone())?;
 
         for arm in &m.arms {
-            if self.pattern_matches(&arm.pattern, &scrutinee)? {
-                match &arm.body {
-                    MatchBody::Expr(e) => return self.eval_expr(e, env),
-                    MatchBody::Block(b) => {
-                        let block_env = Environment::with_parent(env);
-                        return match self.exec_block(b, block_env)? {
-                            Flow::Normal(v) => Ok(v),
-                            Flow::Return(v) => Ok(v),
-                        };
-                    }
+            if let Some(bindings) = self.pattern_bindings(&arm.pattern, &scrutinee)? {
+                let arm_env = Environment::with_parent(env.clone());
+                for (name, value) in bindings {
+                    arm_env.borrow_mut().set(name, value);
                 }
+                return match &arm.body {
+                    MatchBody::Expr(expression) => self.eval_expr(expression, arm_env),
+                    MatchBody::Block(block) => match self.exec_block(block, arm_env)? {
+                        Flow::Normal(value) | Flow::Return(value) => Ok(value),
+                    },
+                };
             }
         }
         Ok(Value::None)
     }
 
-    fn pattern_matches(
+    fn pattern_bindings(
         &mut self,
         pattern: &Pattern,
         value: &Value,
-    ) -> Result<bool, RuntimeError> {
+    ) -> Result<Option<Vec<(String, Value)>>, RuntimeError> {
         match pattern {
-            Pattern::Wildcard(_) => Ok(true),
-            Pattern::Literal(lit) => {
-                let pat_val = match lit {
-                    aec_ast::Literal::Int(n) => Value::Int(*n),
-                    aec_ast::Literal::Float(f) => Value::Float(*f),
-                    aec_ast::Literal::String(s) => Value::String(s.clone()),
-                    aec_ast::Literal::Bool(b) => Value::Bool(*b),
+            Pattern::Wildcard(_) => Ok(Some(Vec::new())),
+            Pattern::Literal(literal) => {
+                let expected = match literal {
+                    aec_ast::Literal::Int(number) => Value::Int(*number),
+                    aec_ast::Literal::Float(number) => Value::Float(*number),
+                    aec_ast::Literal::String(text) | aec_ast::Literal::RawString(text) => {
+                        Value::String(text.clone())
+                    }
+                    aec_ast::Literal::Bool(value) => Value::Bool(*value),
                     aec_ast::Literal::None => Value::None,
-                    _ => return Ok(false),
+                    aec_ast::Literal::Uuid(value) => Value::String(value.to_string()),
+                    aec_ast::Literal::ByteSize(value) => Value::Int(*value as i64),
+                    aec_ast::Literal::Duration(value) => Value::Int(
+                        value
+                            .value
+                            .checked_mul(value.unit.to_ms())
+                            .and_then(|milliseconds| i64::try_from(milliseconds).ok())
+                            .ok_or_else(|| RuntimeError::Generic {
+                                message: "duration pattern is too large".to_string(),
+                                span: aec_ast::Span::dummy(),
+                            })?,
+                    ),
+                    aec_ast::Literal::Interpolated(_) => return Ok(None),
                 };
-                Ok(values_equal(&pat_val, value))
+                Ok(values_equal(&expected, value).then_some(Vec::new()))
             }
-            Pattern::None(_) => Ok(matches!(value, Value::None)),
-            Pattern::Some(_) => Ok(!matches!(value, Value::None)),
-            Pattern::Identifier(_) => Ok(true),
+            Pattern::None(_) => Ok(matches!(value, Value::None).then_some(Vec::new())),
+            Pattern::Some(identifier) => match value {
+                Value::None => Ok(None),
+                Value::Result(Ok(inner)) => Ok(Some(vec![(
+                    identifier.name.clone(),
+                    (**inner).clone(),
+                )])),
+                other => Ok(Some(vec![(identifier.name.clone(), other.clone())])),
+            },
+            Pattern::Identifier(identifier) => {
+                Ok(Some(vec![(identifier.name.clone(), value.clone())]))
+            }
         }
     }
 
@@ -1022,7 +1753,15 @@ impl Interpreter {
             aec_ast::Literal::None => Value::None,
             aec_ast::Literal::Uuid(u) => Value::String(u.to_string()),
             aec_ast::Literal::ByteSize(bytes) => Value::Int(*bytes as i64),
-            aec_ast::Literal::Duration(d) => Value::Int((d.value * d.unit.to_ms()) as i64),
+            aec_ast::Literal::Duration(d) => Value::Int(
+                d.value
+                    .checked_mul(d.unit.to_ms())
+                    .and_then(|value| i64::try_from(value).ok())
+                    .ok_or_else(|| RuntimeError::Generic {
+                        message: "duration literal is too large".to_string(),
+                        span: _span,
+                    })?,
+            ),
             aec_ast::Literal::Interpolated(parts) => {
                 let mut out = String::new();
                 for part in parts {
@@ -1048,7 +1787,13 @@ impl Interpreter {
     ) -> Result<Value, RuntimeError> {
         match op {
             BinaryOp::Add => match (&left, &right) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
+                (Value::Int(a), Value::Int(b)) => a
+                    .checked_add(*b)
+                    .map(Value::Int)
+                    .ok_or_else(|| RuntimeError::Generic {
+                        message: "integer overflow in +".to_string(),
+                        span,
+                    }),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
                 (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 + b)),
                 (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a + *b as f64)),
@@ -1063,29 +1808,35 @@ impl Interpreter {
                     span,
                 }),
             },
-            BinaryOp::Sub => num_op(left, right, span, |a, b| a - b, |a, b| a - b),
-            BinaryOp::Mul => num_op(left, right, span, |a, b| a * b, |a, b| a * b),
+            BinaryOp::Sub => num_op(BinaryOp::Sub, left, right, span),
+            BinaryOp::Mul => num_op(BinaryOp::Mul, left, right, span),
             BinaryOp::Div => {
-                if matches!(right, Value::Int(0)) {
+                if matches!(right, Value::Int(0) | Value::Float(0.0)) {
                     return Err(RuntimeError::DivisionByZero { span });
                 }
-                num_op(left, right, span, |a, b| a / b, |a, b| a / b)
+                num_op(BinaryOp::Div, left, right, span)
             }
             BinaryOp::Mod => {
-                if matches!(right, Value::Int(0)) {
+                if matches!(right, Value::Int(0) | Value::Float(0.0)) {
                     return Err(RuntimeError::DivisionByZero { span });
                 }
-                num_op(left, right, span, |a, b| a % b, |a, b| a % b)
+                num_op(BinaryOp::Mod, left, right, span)
             }
             BinaryOp::Eq => Ok(Value::Bool(values_equal(&left, &right))),
             BinaryOp::Neq => Ok(Value::Bool(!values_equal(&left, &right))),
-            BinaryOp::Lt => cmp_op(left, right, span, |a, b| a < b),
-            BinaryOp::Gt => cmp_op(left, right, span, |a, b| a > b),
-            BinaryOp::Lte => cmp_op(left, right, span, |a, b| a <= b),
-            BinaryOp::Gte => cmp_op(left, right, span, |a, b| a >= b),
+            BinaryOp::Lt => cmp_op(left, right, span, BinaryOp::Lt),
+            BinaryOp::Gt => cmp_op(left, right, span, BinaryOp::Gt),
+            BinaryOp::Lte => cmp_op(left, right, span, BinaryOp::Lte),
+            BinaryOp::Gte => cmp_op(left, right, span, BinaryOp::Gte),
             BinaryOp::And => Ok(Value::Bool(left.is_truthy() && right.is_truthy())),
             BinaryOp::Or => Ok(Value::Bool(left.is_truthy() || right.is_truthy())),
         }
+    }
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1095,17 +1846,46 @@ enum Flow {
 }
 
 fn num_op(
+    op: BinaryOp,
     left: Value,
     right: Value,
     span: aec_ast::Span,
-    int_op: fn(i64, i64) -> i64,
-    float_op: fn(f64, f64) -> f64,
 ) -> Result<Value, RuntimeError> {
     match (&left, &right) {
-        (Value::Int(a), Value::Int(b)) => Ok(Value::Int(int_op(*a, *b))),
-        (Value::Float(a), Value::Float(b)) => Ok(Value::Float(float_op(*a, *b))),
-        (Value::Int(a), Value::Float(b)) => Ok(Value::Float(float_op(*a as f64, *b))),
-        (Value::Float(a), Value::Int(b)) => Ok(Value::Float(float_op(*a, *b as f64))),
+        (Value::Int(a), Value::Int(b)) => {
+            let result = match op {
+                BinaryOp::Sub => a.checked_sub(*b),
+                BinaryOp::Mul => a.checked_mul(*b),
+                BinaryOp::Div => a.checked_div(*b),
+                BinaryOp::Mod => a.checked_rem(*b),
+                _ => None,
+            };
+            result.map(Value::Int).ok_or_else(|| RuntimeError::Generic {
+                message: format!("integer operation failed for {} and {}", a, b),
+                span,
+            })
+        }
+        (Value::Float(a), Value::Float(b)) => Ok(Value::Float(match op {
+            BinaryOp::Sub => a - b,
+            BinaryOp::Mul => a * b,
+            BinaryOp::Div => a / b,
+            BinaryOp::Mod => a % b,
+            _ => return Err(RuntimeError::Generic { message: "invalid numeric operation".to_string(), span }),
+        })),
+        (Value::Int(a), Value::Float(b)) => Ok(Value::Float(match op {
+            BinaryOp::Sub => *a as f64 - b,
+            BinaryOp::Mul => *a as f64 * b,
+            BinaryOp::Div => *a as f64 / b,
+            BinaryOp::Mod => *a as f64 % b,
+            _ => return Err(RuntimeError::Generic { message: "invalid numeric operation".to_string(), span }),
+        })),
+        (Value::Float(a), Value::Int(b)) => Ok(Value::Float(match op {
+            BinaryOp::Sub => a - *b as f64,
+            BinaryOp::Mul => a * *b as f64,
+            BinaryOp::Div => a / *b as f64,
+            BinaryOp::Mod => a % *b as f64,
+            _ => return Err(RuntimeError::Generic { message: "invalid numeric operation".to_string(), span }),
+        })),
         _ => Err(RuntimeError::TypeError {
             message: format!("can't do math on {} and {}", left.type_name(), right.type_name()),
             span,
@@ -1117,13 +1897,37 @@ fn cmp_op(
     left: Value,
     right: Value,
     span: aec_ast::Span,
-    op: fn(f64, f64) -> bool,
+    op: BinaryOp,
 ) -> Result<Value, RuntimeError> {
-    let (a, b) = match (&left, &right) {
-        (Value::Int(a), Value::Int(b)) => (*a as f64, *b as f64),
-        (Value::Float(a), Value::Float(b)) => (*a, *b),
-        (Value::Int(a), Value::Float(b)) => (*a as f64, *b),
-        (Value::Float(a), Value::Int(b)) => (*a, *b as f64),
+    let result = match (&left, &right) {
+        (Value::Int(a), Value::Int(b)) => match op {
+            BinaryOp::Lt => a < b,
+            BinaryOp::Gt => a > b,
+            BinaryOp::Lte => a <= b,
+            BinaryOp::Gte => a >= b,
+            _ => return Err(RuntimeError::Generic { message: "invalid comparison".to_string(), span }),
+        },
+        (Value::Float(a), Value::Float(b)) => match op {
+            BinaryOp::Lt => a < b,
+            BinaryOp::Gt => a > b,
+            BinaryOp::Lte => a <= b,
+            BinaryOp::Gte => a >= b,
+            _ => return Err(RuntimeError::Generic { message: "invalid comparison".to_string(), span }),
+        },
+        (Value::Int(a), Value::Float(b)) => match op {
+            BinaryOp::Lt => (*a as f64) < *b,
+            BinaryOp::Gt => (*a as f64) > *b,
+            BinaryOp::Lte => (*a as f64) <= *b,
+            BinaryOp::Gte => (*a as f64) >= *b,
+            _ => return Err(RuntimeError::Generic { message: "invalid comparison".to_string(), span }),
+        },
+        (Value::Float(a), Value::Int(b)) => match op {
+            BinaryOp::Lt => *a < (*b as f64),
+            BinaryOp::Gt => *a > (*b as f64),
+            BinaryOp::Lte => *a <= (*b as f64),
+            BinaryOp::Gte => *a >= (*b as f64),
+            _ => return Err(RuntimeError::Generic { message: "invalid comparison".to_string(), span }),
+        },
         _ => {
             return Err(RuntimeError::TypeError {
                 message: format!("can't compare {} and {}", left.type_name(), right.type_name()),
@@ -1131,7 +1935,7 @@ fn cmp_op(
             })
         }
     };
-    Ok(Value::Bool(op(a, b)))
+    Ok(Value::Bool(result))
 }
 
 /// Guards a builtin against the wrong number of arguments.
@@ -1150,6 +1954,36 @@ fn require_args(args: &[Value], expected: usize, span: aec_ast::Span) -> Result<
 ///
 /// An object carrying a `text` field (a model response) is unpacked to that
 /// field, so `"{reply}"` prints the answer instead of a debug dump.
+fn literal_value(literal: &aec_ast::Literal) -> Value {
+    match literal {
+        aec_ast::Literal::None => Value::None,
+        aec_ast::Literal::String(value) | aec_ast::Literal::RawString(value) => {
+            Value::String(value.clone())
+        }
+        aec_ast::Literal::Int(value) => Value::Int(*value),
+        aec_ast::Literal::Float(value) => Value::Float(*value),
+        aec_ast::Literal::Bool(value) => Value::Bool(*value),
+        aec_ast::Literal::Uuid(value) => Value::String(value.to_string()),
+        aec_ast::Literal::ByteSize(value) => Value::Int(*value as i64),
+        aec_ast::Literal::Duration(value) => Value::Int(
+            value
+                .value
+                .checked_mul(value.unit.to_ms())
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MAX),
+        ),
+        aec_ast::Literal::Interpolated(parts) => Value::String(
+            parts
+                .iter()
+                .map(|part| match part {
+                    aec_ast::InterpPart::Text(text) => text.clone(),
+                    aec_ast::InterpPart::Expr(_) => String::new(),
+                })
+                .collect(),
+        ),
+    }
+}
+
 fn interp_text(value: Value) -> String {
     match &value {
         Value::Object(fields) => match fields.get("text") {

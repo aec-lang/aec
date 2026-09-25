@@ -37,6 +37,7 @@ impl Value {
 pub struct Function {
     pub name: String,
     pub params: Vec<String>,
+    pub param_defaults: Vec<Option<aec_ast::Expr>>,
     pub body: aec_ast::Block,
     pub env: Env,
 }

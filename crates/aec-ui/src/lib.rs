@@ -9,5 +9,5 @@ pub mod widgets;
 pub use renderer::{run_ui, AecApp};
 pub use widgets::{
     build_widgets, build_widgets_with_components, build_widgets_with_themes, ComponentRegistry,
-    ResolvedTheme, Themes, UiState, UiValue, Widget, WidgetStyle,
+    ResolvedTheme, Themes, UiState, UiValue, Widget, WidgetStyle, EventAction,
 };

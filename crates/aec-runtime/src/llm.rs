@@ -3,12 +3,17 @@
 use crate::errors::RuntimeError;
 use crate::value::Value;
 use aec_ast::Span;
+use crate::permissions::Limits;
 use std::collections::HashMap;
+
+pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
 /// Call an OpenAI-compatible API
 pub fn llm_complete(
     args: &[Value],
     span: Span,
+    restricted: bool,
+    limits: &Limits,
 ) -> Result<Value, RuntimeError> {
     if args.is_empty() {
         return Err(RuntimeError::WrongArgCount {
@@ -25,7 +30,7 @@ pub fn llm_complete(
     let mut temperature = 0.7_f64;
     let mut max_tokens = 500_i64;
     let mut api_key: Option<String> = None;
-    let mut base_url = String::from("https://api.openai.com/v1");
+    let mut base_url = String::from(DEFAULT_BASE_URL);
 
     // first argument: either a string (prompt) or an object
     match &args[0] {
@@ -100,7 +105,12 @@ pub fn llm_complete(
 
     // send the HTTP request
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .timeout(limits.http_timeout())
+        .redirect(if restricted {
+            reqwest::redirect::Policy::none()
+        } else {
+            reqwest::redirect::Policy::default()
+        })
         .build()
         .map_err(|e| RuntimeError::Generic {
             message: format!("failed to build HTTP client: {}", e),
@@ -144,7 +154,10 @@ pub fn llm_complete(
     // extract the text
     let text = json["choices"][0]["message"]["content"]
         .as_str()
-        .unwrap_or("")
+        .ok_or_else(|| RuntimeError::Generic {
+            message: "API response is missing choices[0].message.content".to_string(),
+            span,
+        })?
         .to_string();
 
     // extract token usage

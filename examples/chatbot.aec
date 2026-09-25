@@ -1,0 +1,27 @@
+# Offline chat UI demo. No API key or network connection is needed.
+# Run: aec run examples/chatbot.aec
+
+agent ChatDemo
+
+fn send_message() {
+    if draft != "" {
+        push_to("messages", { role: "user", content: draft })
+        push_to("messages", { role: "assistant", content: "Echo: {draft}" })
+        draft = ""
+    }
+}
+
+ui Main = Screen "AEC Chat Demo" {
+    @draft: string = ""
+    @messages = []
+
+    Column {
+        Heading "Chat"
+        Text "Offline demo: the assistant repeats your message."
+        Messages list: messages
+        Row {
+            Input placeholder: "Write a message" bind value to draft
+            Button "Send" on click -> send_message()
+        }
+    }
+}

@@ -13,7 +13,9 @@ pub fn call_extended(
     args: &[Value],
     span: Span,
     limits: &crate::permissions::Limits,
+    restricted: bool,
 ) -> Result<Option<Value>, RuntimeError> {
+    crate::stdlib::validate_builtin_args(name, args, span)?;
     let result = match name {
         // ============================================================
         // SHELL
@@ -29,8 +31,8 @@ pub fn call_extended(
                     span,
                 }),
             };
-            let output = Command::new("sh")
-                .arg("-c")
+            let output = Command::new(if cfg!(windows) { "cmd" } else { "sh" })
+                .arg(if cfg!(windows) { "/C" } else { "-c" })
                 .arg(&cmd)
                 .output()
                 .map_err(|e| RuntimeError::Generic {
@@ -356,6 +358,7 @@ pub fn call_extended(
             };
             let client = reqwest::blocking::Client::builder()
                 .timeout(limits.http_timeout())
+                .redirect(if restricted { reqwest::redirect::Policy::none() } else { reqwest::redirect::Policy::default() })
                 .build()
                 .map_err(|e| RuntimeError::Generic {
                     message: format!("client error: {}", e),
@@ -392,6 +395,7 @@ pub fn call_extended(
             };
             let client = reqwest::blocking::Client::builder()
                 .timeout(limits.http_timeout())
+                .redirect(if restricted { reqwest::redirect::Policy::none() } else { reqwest::redirect::Policy::default() })
                 .build()
                 .map_err(|e| RuntimeError::Generic {
                     message: format!("client error: {}", e),

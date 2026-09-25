@@ -118,10 +118,15 @@ pub fn compatible(expected: &Ty, actual: &Ty) -> bool {
         (Ty::Optional(e), Ty::Optional(a)) => compatible(e, a),
         (Ty::Optional(e), a) => compatible(e, a),
         (Ty::Array(e), Ty::Array(a)) => compatible(e, a),
-        (Ty::Object(_), Ty::Object(actual_fields)) => {
-            // if the actual value's fields are unknown, we do not enforce strictly
-            actual_fields.is_empty()
-        }
+        (Ty::Object(expected_fields), Ty::Object(actual_fields)) => expected_fields.iter().all(
+            |(name, expected)| {
+                actual_fields
+                    .iter()
+                    .find(|(actual_name, _)| actual_name == name)
+                    .map(|(_, actual)| compatible(expected, actual))
+                    .unwrap_or(false)
+            },
+        ),
         (Ty::Function, Ty::Function) => true,
         (Ty::Result(e_ok, e_err), Ty::Result(a_ok, a_err)) => {
             compatible(e_ok, a_ok) && compatible(e_err, a_err)

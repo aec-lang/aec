@@ -4,6 +4,7 @@ use crate::span::Span;
 
 #[derive(Debug, Clone)]
 pub struct ModelDecl {
+    pub is_public: bool,
     pub name: Identifier,
     pub fields: Vec<ModelField>,
     pub span: Span,

@@ -7,8 +7,8 @@ authors.workspace = true
 description = "Static type checker for the AEC language"
 
 [dependencies]
-aec-ast = { path = "../aec-ast" }
+aec-ast = { version = "0.1.0", path = "../aec-ast" }
 
 [dev-dependencies]
-aec-parser = { path = "../aec-parser" }
+aec-parser = { version = "0.1.0", path = "../aec-parser" }
 pretty_assertions.workspace = true
