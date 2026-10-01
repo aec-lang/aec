@@ -38,6 +38,23 @@ jobs:
         run: cargo run --release -p aec-cli --bin aec -- run examples/nominal.aec --cli
       - name: Linux OS sandbox smoke test
         if: runner.os == 'Linux'
-        run: scripts/sandbox-linux.sh /workspace/target/release/aec check examples/nominal.aec
+        run: |
+          # Ubuntu 24.04 runner images restrict unprivileged user namespaces,
+          # which bubblewrap requires; restore the 22.04 behavior. Harmless
+          # where the sysctl key does not exist.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          scripts/sandbox-linux.sh "$PWD/target/release/aec" check "$PWD/examples/nominal.aec"
       - name: APM smoke test
         run: cargo run --release -p aec-cli --bin apm -- --help
+      - name: Failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo "### CI diagnostics — ${{ runner.os }}"
+            echo '```'
+            rustc --version
+            cargo check --workspace --locked 2>&1 | tail -30 || true
+            cargo test --workspace --locked --no-fail-fast 2>&1 | grep -E "test result:|panicked at|FAILED|failures:" -A 4 | tail -60 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
