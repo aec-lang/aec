@@ -45,6 +45,9 @@ jobs:
         run: python3 scripts/check-site.py
 
       - uses: actions/configure-pages@v5
+        with:
+          # Create the Pages site on first deploy instead of failing with 404.
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: website

@@ -1,0 +1,3 @@
+agent Hello
+let greeting = "سلام از دنیای AEC!"
+print(greeting)

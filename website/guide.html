@@ -434,6 +434,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 </ul>
 <hr />
 <h2 id="documentation">Documentation</h2>
+<p>Read it online at <strong><a href="https://aec-lang.github.io/aec" target="_blank" rel="noopener">aec-lang.github.io/aec</a></strong> — the documentation site is generated from these same files, so the two never disagree.</p>
 <table><thead><tr>
 <th>Document</th>
 <th>Contents</th>
@@ -459,6 +460,10 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 <td>Artifacts, checksums, maintainer procedure</td>
 </tr>
 <tr>
+<td><a href="docs/AEC_Presentation_FA.md">Presentation (FA)</a></td>
+<td>Project overview, in Persian</td>
+</tr>
+<tr>
 <td><a href="docs/roadmap.html">Roadmap</a></td>
 <td>Feature status with per-item verification state</td>
 </tr>
@@ -471,6 +476,11 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 <td>Release history</td>
 </tr>
 </tbody></table>
+<p>To build and preview the site locally:</p>
+<pre><code class="lang-sh">node scripts/build-site.cjs          # docs/ and README.md -&gt; website/
+node scripts/build-registry.cjs      # registry page from a real APM directory
+python3 scripts/check-site.py        # link, nesting, and search-index checks
+python3 -m http.server --directory website 8000</code></pre>
 <h2 id="contributing">Contributing</h2>
 <p>Issues and pull requests are welcome. Run <code>./scripts/ci-local.sh</code> before opening a pull request, and add a test that fails without your change.</p>
 <h2 id="license">License</h2>

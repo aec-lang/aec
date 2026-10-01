@@ -81,8 +81,8 @@
   <div class="rstrip">
     <div><b>1</b><span>published versions</span></div>
     <div><b>1</b><span>packages</span></div>
-    <div><b>2</b><span>files bound</span></div>
-    <div><b>130 B</b><span>payload</span></div>
+    <div><b>3</b><span>files bound</span></div>
+    <div><b>293 B</b><span>payload</span></div>
   </div>
 
   <div class="pkgs">
@@ -92,11 +92,11 @@
         <h3><span class="pname">hello-agent</span> <span class="ver">0.1.0</span></h3>
         <span class="badge ok">signed</span>
       </div>
-      
+      <p class="desc">A tiny example AEC agent package, published to the public APM registry of</p>
       <dl class="facts">
         <div><dt>tree digest</dt><dd><code>…</code></dd></div>
-        <div><dt>files</dt><dd>2</dd></div>
-        <div><dt>payload</dt><dd>130 B</dd></div>
+        <div><dt>files</dt><dd>3</dd></div>
+        <div><dt>payload</dt><dd>293 B</dd></div>
         <div><dt>signature</dt><dd>Ed25519, 64 bytes</dd></div>
       </dl>
       <details>
@@ -105,9 +105,9 @@
 version=0.1.0
 manifest-sha256=
 tree-sha256=
-file-count=2
-payload-size=130
-public-key=f690f1b781f275c09514d65589e0ccb456b963013a1a838b0917cfd556baa3a2</code></pre>
+file-count=3
+payload-size=293
+public-key=a75b3e9a0f3df6a52fee0c7b4afb54d65076d671ed36d5dd53eb56c57fb2603b</code></pre>
       </details>
       <pre class="cmd"><code>apm publish --registry ./registry --private-key ./keys/signing.pkcs8 --package ./hello-agent
 apm verify --registry ./registry --name hello-agent --version 0.1.0 --trust-key ./keys/signing.pub</code></pre>
