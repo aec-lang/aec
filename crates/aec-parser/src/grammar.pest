@@ -6,7 +6,7 @@ agent_header = { "agent" ~ identifier ~ NEWLINE }
 // string interpolation (`"{a + 1}"`) back into an expression.
 expr_root = { SOI ~ NEWLINE* ~ expr ~ NEWLINE* ~ EOI }
 
-top_level_item = _{ secrets_block | permissions_block | limits_block | model_decl | type_alias | import_stmt | fn_decl | component_decl | theme_decl | ui_decl }
+top_level_item = _{ secrets_block | permissions_block | limits_block | model_decl | type_alias | struct_decl | enum_decl | import_stmt | fn_decl | component_decl | theme_decl | ui_decl }
 
 import_stmt = { "import" ~ string_literal ~ alias? ~ NEWLINE }
 alias       = { "as" ~ identifier }
@@ -126,7 +126,13 @@ await_expr      = { "await" ~ expr }
 match_expr  = { "match" ~ expr ~ "{" ~ NEWLINE? ~ match_arm+ ~ "}" }
 match_arm   = { pattern ~ "->" ~ (block | expr) ~ NEWLINE? }
 
-pattern = _{ wildcard_pattern | some_pattern | none_pattern | literal_pattern | identifier }
+pattern = _{ struct_pattern | enum_variant_pattern | wildcard_pattern | some_pattern | none_pattern | literal_pattern | identifier }
+struct_pattern = { struct_pattern_path ~ "{" ~ (struct_pattern_field ~ ("," ~ struct_pattern_field)* ~ ","?)? ~ "}" }
+struct_pattern_path = { identifier ~ ("." ~ identifier)* }
+struct_pattern_field = { identifier ~ ":" ~ pattern }
+enum_variant_pattern = { enum_pattern_path ~ enum_pattern_payload? }
+enum_pattern_path = { identifier ~ ("." ~ identifier)+ }
+enum_pattern_payload = { "(" ~ pattern ~ ")" }
 wildcard_pattern = { "_" }
 some_pattern     = { "some" ~ "(" ~ identifier ~ ")" }
 none_pattern     = { "none" }
@@ -138,6 +144,11 @@ argument        = { (identifier ~ ":")? ~ expr }
 // ---------- Functions ----------
 
 type_alias = { visibility? ~ "type" ~ identifier ~ "=" ~ full_type ~ NEWLINE }
+struct_decl = { visibility? ~ "struct" ~ identifier ~ "{" ~ NEWLINE* ~ struct_field* ~ "}" ~ NEWLINE* }
+struct_field = { identifier ~ ":" ~ full_type ~ NEWLINE? }
+enum_decl = { visibility? ~ "enum" ~ identifier ~ "{" ~ NEWLINE* ~ enum_variant* ~ "}" ~ NEWLINE* }
+enum_variant = { identifier ~ enum_payload? ~ NEWLINE? }
+enum_payload = { "(" ~ full_type ~ ")" }
 fn_decl = { visibility? ~ "fn" ~ identifier ~ "(" ~ param_list? ~ ")" ~ return_type? ~ block ~ NEWLINE* }
 
 param_list = { param ~ ("," ~ param)* }
@@ -145,16 +156,14 @@ param = { identifier ~ ":" ~ full_type ~ ("=" ~ expr)? }
 
 return_type = { "->" ~ full_type }
 base_type = _{ array_type | result_type | primitive_type | named_type }
-// `optional_marker` is a named rule so the builder can actually see the `?`;
-// as an anonymous literal it was dropped and `int?` silently became `int`.
 full_type = { base_type ~ optional_marker? }
 optional_marker = { "?" }
 
 primitive_type = @{ "string" | "int" | "float" | "bool" | "bytes" | "unit" | "uuid" | "timestamp" | "function" }
 named_type     = { qualified_type_name }
 qualified_type_name = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ".")* }
-array_type     = { "[" ~ base_type ~ "]" }
-result_type    = { "Result" ~ "(" ~ base_type ~ "," ~ base_type ~ ")" }
+array_type     = { "[" ~ full_type ~ "]" }
+result_type    = { "Result" ~ "(" ~ full_type ~ "," ~ full_type ~ ")" }
 
 block = { "{" ~ NEWLINE* ~ (statement ~ stmt_sep?)* ~ "}" }
 stmt_sep = _{ NEWLINE+ | &"}" }

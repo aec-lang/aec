@@ -1,0 +1,61 @@
+name: Deploy site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "docs/**"
+      - "scripts/build-site.cjs"
+      - "scripts/build-registry.cjs"
+      - "crates/aec-ui/assets/fonts/Vazirmatn-Regular.ttf"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: aec-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build the static site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build docs pages
+        run: node scripts/build-site.cjs
+
+      # The registry page reads a real APM registry directory. This repository
+      # publishes packages locally rather than serving one over HTTP, so there
+      # is no registry to read and the page renders its empty state. When a
+      # registry is committed or fetched, pass its path here.
+      - name: Build registry page
+        run: node scripts/build-registry.cjs
+
+      - name: Check for broken internal links
+        run: python3 scripts/check-site.py
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website
+
+  deploy:
+    name: Publish to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

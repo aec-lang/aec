@@ -2,6 +2,7 @@
 //! shell, regex, crypto, uuid, sys, more files, more http
 
 use crate::errors::RuntimeError;
+use crate::permissions::{build_http_client, read_limited_response, Limits};
 use crate::value::Value;
 use aec_ast::Span;
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ pub fn call_extended(
     name: &str,
     args: &[Value],
     span: Span,
-    limits: &crate::permissions::Limits,
+    limits: &Limits,
     restricted: bool,
 ) -> Result<Option<Value>, RuntimeError> {
     crate::stdlib::validate_builtin_args(name, args, span)?;
@@ -356,15 +357,11 @@ pub fn call_extended(
                     span,
                 }),
             };
-            let client = reqwest::blocking::Client::builder()
-                .timeout(limits.http_timeout())
-                .redirect(if restricted { reqwest::redirect::Policy::none() } else { reqwest::redirect::Policy::default() })
-                .build()
-                .map_err(|e| RuntimeError::Generic {
-                    message: format!("client error: {}", e),
-                    span,
-                })?;
-            let response = client
+            let client = build_http_client(limits, restricted).map_err(|e| RuntimeError::Generic {
+                message: format!("client error: {}", e),
+                span,
+            })?;
+            let mut response = client
                 .put(&url)
                 .header("User-Agent", "AEC/0.1")
                 .header("Content-Type", "application/json")
@@ -375,7 +372,12 @@ pub fn call_extended(
                     span,
                 })?;
             let status = response.status().as_u16() as i64;
-            let text = response.text().unwrap_or_default();
+            let text = read_limited_response(
+                &mut response,
+                "HTTP PUT",
+                limits.max_response_bytes(),
+                span,
+            )?;
             let mut obj = HashMap::new();
             obj.insert("status".to_string(), Value::Int(status));
             obj.insert("text".to_string(), Value::String(text));
@@ -393,15 +395,11 @@ pub fn call_extended(
                     span,
                 }),
             };
-            let client = reqwest::blocking::Client::builder()
-                .timeout(limits.http_timeout())
-                .redirect(if restricted { reqwest::redirect::Policy::none() } else { reqwest::redirect::Policy::default() })
-                .build()
-                .map_err(|e| RuntimeError::Generic {
-                    message: format!("client error: {}", e),
-                    span,
-                })?;
-            let response = client
+            let client = build_http_client(limits, restricted).map_err(|e| RuntimeError::Generic {
+                message: format!("client error: {}", e),
+                span,
+            })?;
+            let mut response = client
                 .delete(&url)
                 .header("User-Agent", "AEC/0.1")
                 .send()
@@ -410,7 +408,12 @@ pub fn call_extended(
                     span,
                 })?;
             let status = response.status().as_u16() as i64;
-            let text = response.text().unwrap_or_default();
+            let text = read_limited_response(
+                &mut response,
+                "HTTP DELETE",
+                limits.max_response_bytes(),
+                span,
+            )?;
             let mut obj = HashMap::new();
             obj.insert("status".to_string(), Value::Int(status));
             obj.insert("text".to_string(), Value::String(text));

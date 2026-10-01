@@ -16,6 +16,8 @@ Thumbs.db
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
+*.pkcs8
+.aec-sandbox.wsb
 .env
 .env.local
 .aec-token
@@ -27,6 +29,7 @@ Thumbs.db
 *.dylib
 
 # Local scripts
+/tmp/
 fix.sh
 fix2.sh
 setup.sh

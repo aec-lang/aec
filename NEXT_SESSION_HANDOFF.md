@@ -10,9 +10,9 @@
 
 بنا به گفتهٔ سازنده، محمدمهدی علوی، هنگام ساخت این پروژه **۱۳ ساله** بوده و تقریباً در **سه روز** آن را تا مرحلهٔ مطرح‌شده رسانده است. این سن و بازهٔ زمانی ادعای شخصی او هستند، نه نتیجهٔ مستقلاً راستی‌آزمایی‌شدهٔ git history. در معرفی بیرونی به همین دقت بیان شوند.
 
-**وضعیت آخرین اجرای گزارش‌شده:** `cargo test --workspace --locked --no-fail-fast -q` با **۲۷۴ تست قبول، صفر شکست، یک تست ignored**؛ `cargo check --workspace --locked`، `cargo clippy --workspace --all-targets --locked -- -D warnings`، تست‌های CLI/APM، `cargo package --workspace --allow-dirty --no-verify --locked` و `git diff --check` پاک. `cargo fmt --all -- --check` به‌دلیل اختلاف‌های گستردهٔ قالب‌بندی موجود در مخزن شکست می‌خورد؛ برای پرهیز از patch نامرتبط bulk-format انجام نشد. این نتایج لینوکس محلی‌اند؛ علاوه بر آن‌ها، GitHub Actions run `36090223034` روی Linux، macOS و Windows با build/test/package/smoke موفق بود. commitهای اصلی `8d169f8` و `47ce76f` روی `main` و `origin/main` قرار دارند.
+**وضعیت آخرین اجرای گزارش‌شده:** `cargo test --workspace --locked --no-fail-fast -q` با **۳۱۸ تست قبول، صفر شکست، یک تست ignored**؛ `cargo check --workspace --locked`، `cargo clippy --workspace --all-targets --locked -- -D warnings`، تست‌های CLI/APM، `cargo package --workspace --allow-dirty --no-verify --locked` و `git diff --check` پاک. `cargo fmt --all -- --check` به‌دلیل اختلاف‌های گستردهٔ قالب‌بندی موجود در مخزن شکست می‌خورد؛ برای پرهیز از patch نامرتبط bulk-format انجام نشد. این نتایج لینوکس محلی‌اند؛ علاوه بر آن‌ها، GitHub Actions run `36090223034` روی Linux، macOS و Windows با build/test/package/smoke موفق بود. commitهای اصلی `8d169f8` و `47ce76f` روی `main` و `origin/main` قرار دارند.
 
-امتیاز `docs/roadmap.html` اکنون **حدود ۹۸٪ تخمینی و داخلی** است و باید با شواهد همین مخزن بازخوانی شود؛ عدد ۱۰۰٪ فقط برای دامنهٔ تعریف‌شده و پس از آزمون محیط مقصد قابل دفاع است. namespace چندلایه، type alias ساده، package workspace، release build، startup زیر Xvfb و CI سه‌سکویی تأیید شده‌اند؛ اما nominal type، QA بصری native، registry/signing و sandbox سیستم‌عامل هنوز اثبات نشده‌اند. این اعداد را بدون توضیح دامنه و ضعف‌های باز، به عنوان معیار مستقل بیرونی معرفی نکن.
+امتیاز `docs/roadmap.html` اکنون **حدود ۹۸٪ تخمینی و داخلی** است و باید با شواهد همین مخزن بازخوانی شود؛ عدد ۱۰۰٪ فقط برای دامنهٔ تعریف‌شده و پس از آزمون محیط مقصد قابل دفاع است. namespace چندلایه، type alias، nominal struct/enum، package workspace، registry محلی، Ed25519 integrity/signing، Linux bwrap smoke، release build، startup زیر Xvfb و CI سه‌سکویی تأیید شده‌اند؛ اما QA بصری native، runtime registry resolution/key rotation و sandbox بومی macOS/Windows هنوز اثبات نشده‌اند. این اعداد را بدون توضیح دامنه و ضعف‌های باز، به عنوان معیار مستقل بیرونی معرفی نکن.
 
 ## ۲. دستور شروع جلسهٔ بعد
 
@@ -78,20 +78,20 @@ Builtinهای اصلی در `docs/stdlib.md` دسته‌بندی شده‌اند
 
 ### مدل امنیتی، بدون اغراق
 
-با نبودن بلاک `permissions`، رفتار قبلی builtinها unrestricted است. با وجود بلاک، شبکه/فایل/سیستم بر اساس allowlist و اصل default deny در سطح interpreter کنترل می‌شوند؛ `shell.run`، دسترسی environment، `sys.env_all` و memory پایدار رد می‌شوند تا فرمان/secret/state از مسیرهای جانبی دور زده نشود. بدون بلاک، این مسیرها همچنان ممکن‌اند. LLM و HTTP در حالت محدود redirect را دنبال نمی‌کنند. این کنترل‌ها **درون‌فرایندی و cooperative** هستند: sandbox سیستم‌عامل، جداسازی کد بومی غیرقابل‌اعتماد، اثبات امنیت مسیر فایل، یا سیاست جامع egress/CPU/حافظه ادعا نمی‌شود. قبل از استفاده برای کد نامطمئن به ارزیابی امنیتی مستقل نیاز است. فایل importشده هم سیاست root را جایگزین نمی‌کند. `examples/sandbox.aec` و `crates/aec-runtime/tests/permissions.rs` مرجع تست‌اند.
+با نبودن بلاک `permissions`، رفتار قبلی builtinها unrestricted است. با وجود بلاک، شبکه/فایل/سیستم بر اساس allowlist و اصل default deny در سطح interpreter کنترل می‌شوند؛ `shell.run`، دسترسی environment، `sys.env_all` و memory پایدار رد می‌شوند تا فرمان/secret/state از مسیرهای جانبی دور زده نشود. بدون بلاک، این مسیرها همچنان ممکن‌اند. LLM و HTTP در حالت محدود redirect را دنبال نمی‌کنند. این کنترل‌ها **درون‌فرایندی و cooperative** هستند. `scripts/sandbox-linux.sh` روی Linux یک boundary جدیدِ rootless با bwrap، workspace فقط‌خواندنی، tmpfs خصوصی و network namespace جداست؛ macOS/Windows هنوز policy بومی معادل ندارند. قبل از استفاده برای کد نامطمئن به ارزیابی امنیتی مستقل نیاز است. فایل importشده هم سیاست root را جایگزین نمی‌کند. `examples/sandbox.aec`، `scripts/sandbox-linux.sh` و `crates/aec-runtime/tests/permissions.rs` مرجع تست‌اند.
 
 ## ۷. شواهد و اجرای نمونه
 
 | هدف | فرمان | انتظار |
 |---|---|---|
-| همهٔ تست‌های محلی | `cargo test --workspace --locked --no-fail-fast -q` | در آخرین اجرا: ۲۷۴ قبول، ۰ شکست، ۱ ignored |
+| همهٔ تست‌های محلی | `cargo test --workspace --locked --no-fail-fast -q` | در آخرین اجرا: ۳۱۸ قبول، ۰ شکست، ۱ ignored |
 | ساخت/بررسی | `cargo check --workspace --locked` و `cargo clippy --workspace --all-targets --locked -- -D warnings` | در آخرین اجرا بدون warning |
 | چک نمونهٔ Theme | `cargo run -q -p aec-cli -- check examples/theme.aec` | parse/type-check موفق |
 | ماژول چندفایلی | `cargo run -q -p aec-cli -- run examples/modules/main.aec --cli` | مقدار بازگشتی ۴۲ |
 | چک چت آفلاین | `cargo run -q -p aec-cli -- check examples/chatbot.aec` | موفق، بدون API key |
 | سلامت patch | `git diff --check` | بدون whitespace error |
 
-تست‌های crateهای AST/parser/check/runtime/UI/CLI و integration در `crates/*/tests/` و `src` موجودند. تست ۲۷۴ نشان‌دهندهٔ محدودهٔ محلی است، نه benchmark، کاربر واقعی، امنیت تضمین‌شده یا سازگاری سه‌سکویی. هر آزمون جدید را اول مخصوص لایهٔ دست‌خورده و سپس در کل workspace اجرا کن. `--no-fail-fast` مانع پنهان‌ماندن شکست crateهای بعدی می‌شود.
+تست‌های crateهای AST/parser/check/runtime/UI/CLI و integration در `crates/*/tests/` و `src` موجودند. تست ۳۱۸ نشان‌دهندهٔ محدودهٔ محلی است، نه benchmark، کاربر واقعی، امنیت تضمین‌شده یا سازگاری سه‌سکویی. هر آزمون جدید را اول مخصوص لایهٔ دست‌خورده و سپس در کل workspace اجرا کن. `--no-fail-fast` مانع پنهان‌ماندن شکست crateهای بعدی می‌شود.
 
 Workflow در `.github/workflows/ci.yml` برای push/PR با matrix `ubuntu-latest`، `macos-latest`، `windows-latest` و `cargo check/test/build/package/smoke --locked` نوشته شده است. Run `36090223034` روی هر سه سیستم‌عامل با build، test، package و smoke موفق شد. بسته‌بندی binary در workflow آزموده شده، اما انتشار artifact/installer و امضای release هنوز انجام نشده است.
 
@@ -102,20 +102,20 @@ Workflow در `.github/workflows/ci.yml` برای push/PR با matrix `ubuntu-la
 - `docs/language.md`: دستور زبان نمونه و واردکردن فایل.
 - `docs/stdlib.md`: دسته‌بندی builtinها و نکتهٔ LLM/permissions.
 - `docs/components.md` و `docs/themes.md`: UI reusable و tokenها.
-- `examples/language.aec`، `result.aec`، `lambda.aec`، `theme.aec`، `memory.aec`، `sandbox.aec`، `modules/{main,math}.aec`، `chatbot.aec`.
+- `examples/language.aec`، `result.aec`، `lambda.aec`، `nominal.aec`، `theme.aec`، `memory.aec`، `sandbox.aec`، `modules/{main,math}.aec`، `chatbot.aec`.
 - `COMPONENT_SYSTEM_HANDOFF.md`: یادداشت تاریخی دربارهٔ component، نه مرجع اول وضعیت جاری.
 - `docs/AEC_Pitch_2026.pptx`: ارائهٔ مخاطب بیرونی؛ تصویر چشم‌انداز را از قابلیت تأییدشده تفکیک می‌کند.
 - `docs/AEC_Presentation_FA.md`: نسخهٔ متنی همین ارائه؛ شمار تست، وضعیت alias/UI/permissions و مرزهای محصول با وضعیت فعلی هماهنگ شد.
 
 ## ۹. بک‌لاگ واقعی؛ ترتیب پیشنهادی مشروط به خواستهٔ کاربر
 
-1. **۱۸.۶، semantics ماژول:** `pub`، alias چندلایه، duplicate declaration، path resolution، cycle، private/public و type alias پیاده و تست شده‌اند؛ nominal type و registry/signing باز است.
+1. **۱۸.۶، semantics ماژول:** `pub`، alias چندلایه، duplicate declaration، path resolution، cycle، private/public، type alias و nominal struct/enum پیاده و تست شده‌اند؛ registry/signing باز است.
 2. **۱۸.۴، state lifecycle:** scope/identity component و loop، rebuild واکنشی، event arguments و cleanup پیاده و تست واحد دارد؛ QA بصری پنجرهٔ واقعی در هر سه سیستم باقی است.
-3. **۱۸.۸، checker فاز بعد:** UI/state/property/type/arity/unknown-function/index diagnostics، named/default arguments و type alias اضافه شده‌اند؛ nominal type و استنتاج کامل هنوز `Any`/design باز دارند.
+3. **۱۸.۸، checker فاز بعد:** UI/state/property/type/arity/unknown-function/index diagnostics، named/default arguments، type alias و nominal type اضافه شده‌اند؛ generic و استنتاج کامل هنوز `Any`/design باز دارند.
 4. **۱۸.۹ و ۱۸.۳، CI و distribution:** workflow سه‌سکویی با build/package/smoke و run موفق `36090223034` اضافه شده است؛ انتشار artifact release و امضا هنوز تأیید نشده‌اند.
 5. **۱۸.۱۰، docs/demo:** راهنمای زبان، stdlib، component، theme، APM و مثال‌ها به‌روز شده‌اند؛ دموی آنلاین واقعی فقط با کلید و secret-management مناسب باقی است و نمونهٔ chat آفلاین است.
-6. **۱۸.۱۱، APM:** binary `apm` با `init`، `add`، `remove`، `install`، `list`، `tree`، manifest/lockfile و تست integration برای path dependency محلی پیاده شده‌اند؛ registry و package signing خارج از دامنهٔ فعلی‌اند.
-7. **۱۸.۱۲، فراتر از دامنه:** async/await واقعی، bytecode optimization، A2A، IDE و sandbox OS در چشم‌اندازند، نه قابلیت فعلی؛ اول مسئله و طراحی را اعتبارسنجی کن.
+6. **۱۸.۱۱، APM:** binary `apm` با `init`، `add`، `remove`، `install`، `list`، `tree`، manifest/lockfile و تست integration برای path dependency محلی پیاده شده‌اند؛ registry محلی، SHA-256 integrity و Ed25519 detached signing با trust key صریح نیز اضافه شده‌اند. runtime registry resolution و key rotation هنوز باقی است.
+7. **۱۸.۱۲، فراتر از دامنه:** async/await واقعی، bytecode optimization، A2A، IDE و sandbox OS در چشم‌اندازند، نه قابلیت فعلی؛ Linux bwrap boundary اضافه شده اما macOS/Windows policy هنوز باقی است.
 
 برای تغییر `docs/roadmap.html` هر بار denominator وزن‌ها، صورت، ردیف‌ها، ۳ عدد خلاصه و شمار تست را هماهنگ نگه دار. ۱۰۰٪ فقط پس از تعریف دامنه، تکمیل ردیف‌های الزام‌آور و آزمون محیط هدف قابل دفاع است.
 

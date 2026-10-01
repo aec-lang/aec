@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Native UI renderer for AEC (GPU-based)"
 
 [dependencies]
@@ -11,6 +13,8 @@ aec-ast = { version = "0.1.0", path = "../aec-ast" }
 aec-runtime = { version = "0.1.0", path = "../aec-runtime" }
 egui.workspace = true
 eframe.workspace = true
+libc.workspace = true
+png = "0.18"
 
 [dev-dependencies]
 aec-parser = { version = "0.1.0", path = "../aec-parser" }

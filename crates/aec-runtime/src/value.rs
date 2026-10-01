@@ -1,9 +1,9 @@
 //! Runtime values
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
-use std::cell::RefCell;
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -14,6 +14,15 @@ pub enum Value {
     None,
     Array(Vec<Value>),
     Object(HashMap<String, Value>),
+    Struct {
+        type_id: String,
+        fields: HashMap<String, Value>,
+    },
+    Enum {
+        type_id: String,
+        variant: String,
+        values: Vec<Value>,
+    },
     Function(Rc<Function>),
     /// A lambda value (`x => expr`).
     Closure(Rc<Closure>),
@@ -113,6 +122,8 @@ impl Value {
             Value::None => "none",
             Value::Array(_) => "array",
             Value::Object(_) => "object",
+            Value::Struct { .. } => "struct",
+            Value::Enum { .. } => "enum",
             Value::Function(_) => "function",
             Value::Closure(_) => "function",
             Value::Result(_) => "result",
@@ -160,10 +171,40 @@ impl fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
+            Value::Struct { type_id, fields } => {
+                write!(f, "{}(", display_type_id(type_id))?;
+                let mut names = fields.keys().collect::<Vec<_>>();
+                names.sort();
+                for (index, name) in names.into_iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", name, fields[name])?;
+                }
+                write!(f, ")")
+            }
+            Value::Enum { type_id, variant, values } => {
+                write!(f, "{}.{}", display_type_id(type_id), variant)?;
+                if !values.is_empty() {
+                    write!(f, "(")?;
+                    for (index, value) in values.iter().enumerate() {
+                        if index > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", value)?;
+                    }
+                    write!(f, ")")?;
+                }
+                Ok(())
+            }
             Value::Function(func) => write!(f, "<fn {}>", func.name),
             Value::Closure(_) => write!(f, "<lambda>"),
             Value::Result(Ok(v)) => write!(f, "ok({})", v),
             Value::Result(Err(e)) => write!(f, "err({})", e),
         }
     }
+}
+
+fn display_type_id(type_id: &str) -> String {
+    type_id.replace("::", ".")
 }

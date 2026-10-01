@@ -28,7 +28,11 @@ fn run(dir: &Path, args: &[&str]) -> (bool, String) {
         .unwrap();
     (
         output.status.success(),
-        format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ),
     )
 }
 
@@ -36,9 +40,21 @@ fn run(dir: &Path, args: &[&str]) -> (bool, String) {
 fn imports_relative_to_each_source_and_checks_cross_file_calls() {
     let dir = fixture();
     std::fs::create_dir(dir.join("lib")).unwrap();
-    write(&dir, "main.aec", "agent Main\nimport \"./lib/first.aec\"\nfn main() -> int {\n    return helper_one()\n}\n");
-    write(&dir.join("lib"), "first.aec", "agent First\nimport \"../second.aec\"\nfn helper_one() -> int {\n    return second()\n}\n");
-    write(&dir, "second.aec", "agent Second\nfn second() -> int {\n    return 42\n}\n");
+    write(
+        &dir,
+        "main.aec",
+        "agent Main\nimport \"./lib/first.aec\"\nfn main() -> int {\n    return helper_one()\n}\n",
+    );
+    write(
+        &dir.join("lib"),
+        "first.aec",
+        "agent First\nimport \"../second.aec\"\nfn helper_one() -> int {\n    return second()\n}\n",
+    );
+    write(
+        &dir,
+        "second.aec",
+        "agent Second\nfn second() -> int {\n    return 42\n}\n",
+    );
 
     let (ok, output) = run(&dir, &["run", "main.aec", "--cli"]);
     assert!(ok, "{output}");
@@ -53,7 +69,11 @@ fn repeated_imports_are_loaded_once() {
     write(&dir, "main.aec", "agent Main\nimport \"one.aec\"\nimport \"two.aec\"\nfn main() -> int {\n    return shared()\n}\n");
     write(&dir, "one.aec", "agent One\nimport \"shared.aec\"\n");
     write(&dir, "two.aec", "agent Two\nimport \"shared.aec\"\n");
-    write(&dir, "shared.aec", "agent Shared\nfn shared() -> int {\n    return 7\n}\n");
+    write(
+        &dir,
+        "shared.aec",
+        "agent Shared\nfn shared() -> int {\n    return 7\n}\n",
+    );
     let (ok, output) = run(&dir, &["check", "main.aec"]);
     assert!(ok, "{output}");
     assert!(output.contains("Items: 2"), "{output}");
@@ -77,8 +97,16 @@ fn circular_and_missing_imports_fail() {
 #[test]
 fn imported_parse_and_type_errors_report_the_right_file() {
     let dir = fixture();
-    write(&dir, "main.aec", "agent Main\nimport \"other.aec\"\nfn main() -> int {\n    return bad()\n}\n");
-    write(&dir, "other.aec", "agent Other\nfn bad() -> int {\n    let value: int = \"wrong\"\n    return value\n}\n");
+    write(
+        &dir,
+        "main.aec",
+        "agent Main\nimport \"other.aec\"\nfn main() -> int {\n    return bad()\n}\n",
+    );
+    write(
+        &dir,
+        "other.aec",
+        "agent Other\nfn bad() -> int {\n    let value: int = \"wrong\"\n    return value\n}\n",
+    );
     let (ok, output) = run(&dir, &["run", "main.aec", "--cli"]);
     assert!(!ok, "{output}");
     assert!(output.contains("other.aec"), "{output}");
@@ -113,8 +141,16 @@ fn aliases_resolve_public_exports() {
 #[test]
 fn aliased_private_functions_are_not_in_the_root_namespace() {
     let dir = fixture();
-    write(&dir, "main.aec", "agent Main\nimport \"other.aec\" as other\nfn main() -> int { return hidden() }\n");
-    write(&dir, "other.aec", "agent Other\nfn hidden() -> int { return 1 }\n");
+    write(
+        &dir,
+        "main.aec",
+        "agent Main\nimport \"other.aec\" as other\nfn main() -> int { return hidden() }\n",
+    );
+    write(
+        &dir,
+        "other.aec",
+        "agent Other\nfn hidden() -> int { return 1 }\n",
+    );
     let (ok, output) = run(&dir, &["check", "main.aec"]);
     assert!(!ok, "{output}");
     assert!(output.contains("unknown function \"hidden\""), "{output}");
@@ -123,8 +159,16 @@ fn aliased_private_functions_are_not_in_the_root_namespace() {
 #[test]
 fn separate_aliases_can_reuse_declaration_names() {
     let dir = fixture();
-    write(&dir, "one.aec", "agent One\npub fn shared() -> int { return 1 }\n");
-    write(&dir, "two.aec", "agent Two\npub fn shared() -> int { return 2 }\n");
+    write(
+        &dir,
+        "one.aec",
+        "agent One\npub fn shared() -> int { return 1 }\n",
+    );
+    write(
+        &dir,
+        "two.aec",
+        "agent Two\npub fn shared() -> int { return 2 }\n",
+    );
     write(
         &dir,
         "main.aec",
@@ -167,7 +211,10 @@ fn aliased_private_components_are_not_visible() {
     );
     let (ok, output) = run(&dir, &["check", "main.aec"]);
     assert!(!ok, "{output}");
-    assert!(output.contains("unknown component \"lib.Panel\""), "{output}");
+    assert!(
+        output.contains("unknown component \"lib.Panel\""),
+        "{output}"
+    );
 }
 
 #[test]
@@ -299,8 +346,16 @@ fn aliased_public_type_aliases_can_be_used_in_annotations() {
 #[test]
 fn duplicate_imported_declarations_are_rejected() {
     let dir = fixture();
-    write(&dir, "one.aec", "agent One\npub fn shared() -> int { return 1 }\n");
-    write(&dir, "two.aec", "agent Two\npub fn shared() -> int { return 2 }\n");
+    write(
+        &dir,
+        "one.aec",
+        "agent One\npub fn shared() -> int { return 1 }\n",
+    );
+    write(
+        &dir,
+        "two.aec",
+        "agent Two\npub fn shared() -> int { return 2 }\n",
+    );
     write(&dir, "main.aec", "agent Main\nimport \"one.aec\"\nimport \"two.aec\"\nfn main() -> int { return shared() }\n");
     let (ok, output) = run(&dir, &["check", "main.aec"]);
     assert!(!ok, "{output}");
@@ -310,8 +365,16 @@ fn duplicate_imported_declarations_are_rejected() {
 #[test]
 fn private_declarations_are_not_available_through_an_alias() {
     let dir = fixture();
-    write(&dir, "main.aec", "agent Main\nimport \"other.aec\" as other\nfn main() -> int { return other.hidden() }\n");
-    write(&dir, "other.aec", "agent Other\nfn hidden() -> int { return 1 }\n");
+    write(
+        &dir,
+        "main.aec",
+        "agent Main\nimport \"other.aec\" as other\nfn main() -> int { return other.hidden() }\n",
+    );
+    write(
+        &dir,
+        "other.aec",
+        "agent Other\nfn hidden() -> int { return 1 }\n",
+    );
     let (ok, output) = run(&dir, &["check", "main.aec"]);
     assert!(!ok, "{output}");
     assert!(output.contains("has no export"), "{output}");
@@ -320,9 +383,225 @@ fn private_declarations_are_not_available_through_an_alias() {
 #[test]
 fn imported_file_cannot_override_entry_permissions() {
     let dir = fixture();
-    write(&dir, "main.aec", "agent Main\npermissions {\n    network: []\n}\nimport \"other.aec\"\n");
-    write(&dir, "other.aec", "agent Other\npermissions {\n    network: [\"other.example\"]\n}\n");
+    write(
+        &dir,
+        "main.aec",
+        "agent Main\npermissions {\n    network: []\n}\nimport \"other.aec\"\n",
+    );
+    write(
+        &dir,
+        "other.aec",
+        "agent Other\npermissions {\n    network: [\"other.example\"]\n}\n",
+    );
     let (ok, output) = run(&dir, &["check", "main.aec"]);
     assert!(!ok, "{output}");
-    assert!(output.contains("permissions and limits must be declared in the entry file"), "{output}");
+    assert!(
+        output.contains("permissions and limits must be declared in the entry file"),
+        "{output}"
+    );
+}
+
+#[test]
+fn aliased_public_structs_enums_and_aliases_are_checked() {
+    let dir = fixture();
+    write(
+        &dir,
+        "types.aec",
+        r#"agent Types
+pub struct User {
+    name: string
+}
+pub enum Role {
+    Admin
+    Suspended(string)
+}
+pub type UserList = [User]
+"#,
+    );
+    write(
+        &dir,
+        "main.aec",
+        r#"agent Main
+import "types.aec" as types
+fn make() -> types.User {
+    return types.User(name: "Ada")
+}
+fn suspended() -> types.Role {
+    return types.Role.Suspended("x")
+}
+fn label(role: types.Role) -> string {
+    return match role {
+        types.Role.Admin -> "admin"
+        types.Role.Suspended(reason) -> reason
+    }
+}
+fn main() -> string {
+    let user: types.User = make()
+    let users: types.UserList = [user]
+    return user.name
+}
+"#,
+    );
+    let (ok, output) = run(&dir, &["check", "main.aec"]);
+    assert!(ok, "{output}");
+}
+
+#[test]
+fn unaliased_public_types_follow_the_existing_flat_namespace() {
+    let dir = fixture();
+    write(
+        &dir,
+        "types.aec",
+        r#"agent Types
+pub struct User {
+    name: string
+}
+pub enum Role {
+    Admin
+}
+"#,
+    );
+    write(
+        &dir,
+        "main.aec",
+        r#"agent Main
+import "types.aec"
+fn main() -> string {
+    let user = User(name: "Ada")
+    let role: Role = Role.Admin
+    return user.name
+}
+"#,
+    );
+    let (ok, output) = run(&dir, &["check", "main.aec"]);
+    assert!(ok, "{output}");
+}
+
+#[test]
+fn private_types_are_rejected_through_module_paths() {
+    let dir = fixture();
+    write(
+        &dir,
+        "types.aec",
+        r#"agent Types
+struct User {
+    name: string
+}
+enum Role {
+    Admin
+}
+"#,
+    );
+    write(
+        &dir,
+        "main.aec",
+        r#"agent Main
+import "types.aec" as types
+fn make() -> types.User {
+    return types.User(name: "Ada")
+}
+"#,
+    );
+    let (ok, output) = run(&dir, &["check", "main.aec"]);
+    assert!(!ok, "{output}");
+    assert!(output.contains("is private to its module"), "{output}");
+}
+
+#[test]
+fn same_named_types_from_different_modules_keep_distinct_identities() {
+    let dir = fixture();
+    write(
+        &dir,
+        "one.aec",
+        "agent One\npub struct User {\n    name: string\n}\n",
+    );
+    write(
+        &dir,
+        "two.aec",
+        "agent Two\npub struct User {\n    name: string\n}\n",
+    );
+    write(
+        &dir,
+        "main.aec",
+        r#"agent Main
+import "one.aec" as first
+import "two.aec" as second
+fn invalid(value: first.User) -> second.User {
+    return value
+}
+fn main() -> first.User {
+    return first.User(name: "Ada")
+}
+"#,
+    );
+    let (ok, output) = run(&dir, &["check", "main.aec"]);
+    assert!(!ok, "{output}");
+    assert!(output.contains("expected second::User"), "{output}");
+    assert!(output.contains("got first::User"), "{output}");
+}
+
+#[test]
+fn duplicate_imported_structs_are_rejected_by_loader() {
+    let dir = fixture();
+    write(
+        &dir,
+        "one.aec",
+        "agent One\npub struct User {\n    name: string\n}\n",
+    );
+    write(
+        &dir,
+        "two.aec",
+        "agent Two\npub struct User {\n    name: string\n}\n",
+    );
+    write(
+        &dir,
+        "main.aec",
+        "agent Main\nimport \"one.aec\"\nimport \"two.aec\"\n",
+    );
+    let (ok, output) = run(&dir, &["check", "main.aec"]);
+    assert!(!ok, "{output}");
+    assert!(output.contains("duplicate struct 'User'"), "{output}");
+}
+
+#[test]
+fn duplicate_imported_enums_are_rejected_by_loader() {
+    let dir = fixture();
+    write(
+        &dir,
+        "one.aec",
+        "agent One\npub enum Role {\n    Admin\n}\n",
+    );
+    write(
+        &dir,
+        "two.aec",
+        "agent Two\npub enum Role {\n    Admin\n}\n",
+    );
+    write(
+        &dir,
+        "main.aec",
+        "agent Main\nimport \"one.aec\"\nimport \"two.aec\"\n",
+    );
+    let (ok, output) = run(&dir, &["check", "main.aec"]);
+    assert!(!ok, "{output}");
+    assert!(output.contains("duplicate enum 'Role'"), "{output}");
+}
+
+#[test]
+fn function_and_type_collisions_are_reported_by_checker() {
+    let dir = fixture();
+    write(
+        &dir,
+        "main.aec",
+        r#"agent Main
+struct User {
+    name: string
+}
+fn User() -> int {
+    return 1
+}
+"#,
+    );
+    let (ok, output) = run(&dir, &["check", "main.aec"]);
+    assert!(!ok, "{output}");
+    assert!(output.contains("collides with function"), "{output}");
 }

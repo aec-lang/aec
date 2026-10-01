@@ -574,3 +574,248 @@ fn f() -> int {
 "#;
     assert_eq!(as_int(call(src, "f", vec![])), 10);
 }
+
+#[test]
+fn struct_fields_support_nested_assignment() {
+    let src = r#"agent Test
+
+struct Address { city: string }
+struct User { name: string age: int address: Address }
+
+fn f() -> string {
+    var user = User(name: "Ada", age: 42, address: Address(city: "London"))
+    user.name = "Grace"
+    user.address.city = "Paris"
+    return user.name + ":" + user.address.city + ":" + str(user.age)
+}
+"#;
+    assert_eq!(as_string(call(src, "f", vec![])), "Grace:Paris:42");
+}
+
+#[test]
+fn enum_unit_and_payload_patterns_match() {
+    let src = r#"agent Test
+
+enum Role { Admin Suspended(string) }
+
+fn classify(role: Role) -> string {
+    match role {
+        Role.Admin -> "admin"
+        Role.Suspended(reason) -> reason
+        _ -> "other"
+    }
+}
+
+fn f() -> string {
+    return classify(Role.Admin) + ":" + classify(Role.Suspended("x"))
+}
+"#;
+    assert_eq!(as_string(call(src, "f", vec![])), "admin:x");
+}
+
+#[test]
+fn enum_payload_patterns_recurse_through_nested_values() {
+    let src = r#"agent Test
+
+enum Inner { Stop(string) }
+enum Outer { Wrap(Inner) }
+
+fn reason(value: Outer) -> string {
+    match value {
+        Outer.Wrap(Inner.Stop(reason)) -> reason
+        _ -> ""
+    }
+}
+
+fn f() -> string {
+    return reason(Outer.Wrap(Inner.Stop("done")))
+}
+"#;
+    assert_eq!(as_string(call(src, "f", vec![])), "done");
+}
+
+#[test]
+fn runtime_resolves_type_aliases_for_constructor_checks() {
+    let src = r#"agent Test
+
+type UserName = string
+struct User { name: UserName }
+
+fn bad() {
+    let value = User(name: 1)
+}
+"#;
+    let error = try_call(src, "bad", vec![]).expect_err("alias type must be checked at runtime");
+    assert!(format!("{}", error).contains("expects string"), "{}", error);
+}
+
+#[test]
+fn struct_patterns_bind_fields() {
+    let src = r#"agent Test
+
+struct User { name: string age: int }
+
+fn describe(user: User) -> string {
+    match user {
+        User { name: name, age: age } -> name + ":" + str(age)
+    }
+}
+
+fn f() -> string {
+    return describe(User(name: "Ada", age: 42))
+}
+"#;
+    assert_eq!(as_string(call(src, "f", vec![])), "Ada:42");
+}
+
+#[test]
+fn struct_and_enum_equality_is_nominal() {
+    let src = r#"agent Test
+
+struct User { name: string }
+struct Other { name: string }
+enum Role { Admin Member }
+
+fn f() -> bool {
+    let first = User(name: "Ada")
+    let second = User(name: "Ada")
+    let other = Other(name: "Ada")
+    let object_first = { name: "Ada" }
+    let object_second = { name: "Ada" }
+    let array_first = [1, { name: "Ada" }]
+    let array_second = [1, { name: "Ada" }]
+    return first == second and first != other and Role.Admin == Role.Admin and object_first == object_second and array_first == array_second
+}
+"#;
+    assert!(matches!(call(src, "f", vec![]), Value::Bool(true)));
+}
+
+#[test]
+fn struct_and_enum_constructor_mismatches_are_clear() {
+    let src = r#"agent Test
+
+struct User { name: string age: int }
+enum Role { Admin Suspended(string) }
+
+fn bad_field() -> int {
+    let value = User(name: "Ada", age: 1, extra: true)
+    return 0
+}
+
+fn bad_type() -> int {
+    let value = User(name: "Ada", age: "old")
+    return 0
+}
+
+fn bad_arity() -> int {
+    let value = User(name: "Ada")
+    return 0
+}
+
+fn bad_variant() -> int {
+    let value = Role.Unknown
+    return 0
+}
+
+fn bad_payload() -> int {
+    let value = Role.Suspended(7)
+    return 0
+}
+
+fn bad_assignment() -> int {
+    var value = User(name: "Ada", age: 1)
+    value.age = "old"
+    return 0
+}
+"#;
+    for (name, expected) in [
+        ("bad_field", "field"),
+        ("bad_type", "expects int"),
+        ("bad_arity", "expected 2, got 1"),
+        ("bad_variant", "variant"),
+        ("bad_payload", "expects string"),
+        ("bad_assignment", "field 'age'"),
+    ] {
+        let error = try_call(src, name, vec![]).expect_err("constructor mismatch must fail");
+        assert!(
+            format!("{}", error).contains(expected),
+            "{}: unexpected message: {}",
+            name,
+            error
+        );
+    }
+}
+
+#[test]
+fn qualified_type_constructors_use_module_identity() {
+    let src = r#"agent Test
+
+pub struct User { name: string }
+pub enum Role { Admin }
+
+pub fn make() -> string {
+    let user = lib.User(name: "Ada")
+    let role = lib.Role.Admin
+    return user.name + str(role)
+}
+"#;
+    let mut program = parse(src).expect("source should parse");
+    for module in &mut program.item_modules {
+        *module = Some("lib".to_string());
+    }
+    let mut interp = Interpreter::new();
+    interp.run(&program).expect("program should load");
+    let value = interp
+        .call_function("lib.make", vec![], Span::dummy())
+        .expect("qualified module call should succeed");
+    assert_eq!(as_string(value), "Adalib.Role.Admin");
+}
+
+#[test]
+fn structured_values_have_display_and_json_shapes() {
+    let src = r#"agent Test
+
+struct User { name: string }
+enum Role { Admin }
+
+fn f() -> string {
+    let user = User(name: "Ada")
+    return str(user) + "|" + json.stringify(Role.Admin)
+}
+"#;
+    let value = as_string(call(src, "f", vec![]));
+    assert!(value.contains("User(name: Ada)"), "unexpected display: {}", value);
+    assert!(
+        value.contains("\"variant\":\"Admin\""),
+        "unexpected JSON: {}",
+        value
+    );
+}
+
+#[test]
+fn array_and_object_equality_is_structural() {
+    let src = r#"agent Test
+
+fn f() -> bool {
+    let first = [1, [2, 3], { name: "Ada" }]
+    let second = [1, [2, 3], { name: "Ada" }]
+    let different = [1, [2, 4], { name: "Ada" }]
+    let object_first = { a: 1, nested: { value: "x" } }
+    let object_second = { nested: { value: "x" }, a: 1 }
+    let object_different = { a: 2, nested: { value: "x" } }
+    return first == second and first != different and object_first == object_second and object_first != object_different
+}
+"#;
+    assert!(matches!(call(src, "f", vec![]), Value::Bool(true)));
+}
+
+#[test]
+fn string_length_counts_unicode_code_points() {
+    let src = r#"agent Test
+
+fn f() -> int {
+    return len("é🙂")
+}
+"#;
+    assert_eq!(as_int(call(src, "f", vec![])), 2);
+}

@@ -1,0 +1,26 @@
+agent Nominal
+
+struct User {
+    name: string
+    age: int
+}
+
+enum Role {
+    Admin
+    Member
+    Suspended(string)
+}
+
+fn describe(role: Role) -> string {
+    return match role {
+        Role.Admin -> "admin"
+        Role.Member -> "member"
+        Role.Suspended(reason) -> reason
+    }
+}
+
+fn main() -> string {
+    let user = User(name: "Ada", age: 42)
+    let role = Role.Suspended("review")
+    return user.name + ":" + describe(role)
+}

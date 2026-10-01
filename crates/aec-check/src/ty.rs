@@ -21,6 +21,8 @@ pub enum Ty {
     Array(Box<Ty>),
     /// Object with known fields (may be incomplete)
     Object(Vec<(String, Ty)>),
+    Struct(String),
+    Enum(String),
     Function,
     Optional(Box<Ty>),
     /// `Result(ok, err)` — produced by `ok(...)` / `err(...)`
@@ -76,6 +78,8 @@ impl fmt::Display for Ty {
                     write!(f, "{{{}}}", inner.join(", "))
                 }
             }
+            Ty::Struct(name) => write!(f, "{}", name),
+            Ty::Enum(name) => write!(f, "{}", name),
             Ty::Function => write!(f, "function"),
             Ty::Optional(t) => write!(f, "{}?", t),
             Ty::Result(ok, err) => write!(f, "Result({}, {})", ok, err),
@@ -96,7 +100,6 @@ pub fn ty_from_expr(te: &TypeExpr) -> Ty {
         TypeExpr::Uuid => Ty::Uuid,
         TypeExpr::Timestamp => Ty::Timestamp,
         TypeExpr::Function => Ty::Function,
-        // user types (struct) are not supported for now
         TypeExpr::Named(_) => Ty::Any,
         TypeExpr::Optional(inner) => Ty::Optional(Box::new(ty_from_expr(inner))),
         TypeExpr::Array(inner) => Ty::Array(Box::new(ty_from_expr(inner))),
@@ -118,15 +121,15 @@ pub fn compatible(expected: &Ty, actual: &Ty) -> bool {
         (Ty::Optional(e), Ty::Optional(a)) => compatible(e, a),
         (Ty::Optional(e), a) => compatible(e, a),
         (Ty::Array(e), Ty::Array(a)) => compatible(e, a),
-        (Ty::Object(expected_fields), Ty::Object(actual_fields)) => expected_fields.iter().all(
-            |(name, expected)| {
+        (Ty::Object(expected_fields), Ty::Object(actual_fields)) => {
+            expected_fields.iter().all(|(name, expected)| {
                 actual_fields
                     .iter()
                     .find(|(actual_name, _)| actual_name == name)
                     .map(|(_, actual)| compatible(expected, actual))
                     .unwrap_or(false)
-            },
-        ),
+            })
+        }
         (Ty::Function, Ty::Function) => true,
         (Ty::Result(e_ok, e_err), Ty::Result(a_ok, a_err)) => {
             compatible(e_ok, a_ok) && compatible(e_err, a_err)

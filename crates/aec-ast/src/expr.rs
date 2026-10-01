@@ -210,4 +210,27 @@ pub enum Pattern {
     None(Span),
     Literal(Literal),
     Identifier(Identifier),
+    EnumVariant(EnumVariantPattern),
+    Struct(StructPattern),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumVariantPattern {
+    pub path: Vec<Identifier>,
+    pub payload: Option<Box<Pattern>>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructPattern {
+    pub path: Vec<Identifier>,
+    pub fields: Vec<StructPatternField>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructPatternField {
+    pub name: Identifier,
+    pub pattern: Box<Pattern>,
+    pub span: Span,
 }

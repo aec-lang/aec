@@ -3,7 +3,7 @@
 use crate::errors::RuntimeError;
 use crate::value::Value;
 use aec_ast::Span;
-use crate::permissions::Limits;
+use crate::permissions::{build_http_client, read_limited_response, Limits};
 use std::collections::HashMap;
 
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
@@ -60,8 +60,19 @@ pub fn llm_complete(
             if let Some(Value::Int(i)) = o.get("max_tokens") {
                 max_tokens = *i;
             }
-            if let Some(Value::String(s)) = o.get("api_key") {
-                api_key = Some(s.clone());
+            if let Some(value) = o.get("api_key") {
+                match value {
+                    Value::String(s) => api_key = Some(s.clone()),
+                    other => {
+                        return Err(RuntimeError::TypeError {
+                            message: format!(
+                                "llm.complete api_key needs string, got {}",
+                                other.type_name()
+                            ),
+                            span,
+                        })
+                    }
+                }
             }
             if let Some(Value::String(s)) = o.get("base_url") {
                 base_url = s.clone();
@@ -75,9 +86,21 @@ pub fn llm_complete(
         }
     }
 
-    // if api_key wasn't passed, take it from the env
     let api_key = match api_key {
-        Some(k) => k,
+        Some(key) if key.is_empty() => {
+            return Err(RuntimeError::Generic {
+                message: "llm.complete api_key must not be empty".to_string(),
+                span,
+            })
+        }
+        Some(key) => key,
+        None if restricted => {
+            return Err(crate::permissions::denied(
+                "implicit OPENAI_API_KEY access is disabled in restricted mode; pass an explicit api_key option"
+                    .to_string(),
+                span,
+            ))
+        }
         None => std::env::var("OPENAI_API_KEY").map_err(|_| RuntimeError::Generic {
             message: "OPENAI_API_KEY not set. Either pass api_key in options or set env var."
                 .to_string(),
@@ -104,22 +127,14 @@ pub fn llm_complete(
     });
 
     // send the HTTP request
-    let client = reqwest::blocking::Client::builder()
-        .timeout(limits.http_timeout())
-        .redirect(if restricted {
-            reqwest::redirect::Policy::none()
-        } else {
-            reqwest::redirect::Policy::default()
-        })
-        .build()
-        .map_err(|e| RuntimeError::Generic {
-            message: format!("failed to build HTTP client: {}", e),
-            span,
-        })?;
+    let client = build_http_client(limits, restricted).map_err(|e| RuntimeError::Generic {
+        message: format!("failed to build HTTP client: {}", e),
+        span,
+    })?;
 
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
-    let response = client
+    let mut response = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
@@ -131,10 +146,12 @@ pub fn llm_complete(
         })?;
 
     let status = response.status();
-    let response_text = response.text().map_err(|e| RuntimeError::Generic {
-        message: format!("failed to read response: {}", e),
+    let response_text = read_limited_response(
+        &mut response,
+        "LLM",
+        limits.max_response_bytes(),
         span,
-    })?;
+    )?;
 
     if !status.is_success() {
         return Err(RuntimeError::Generic {

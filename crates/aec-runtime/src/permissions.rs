@@ -18,11 +18,13 @@
 use crate::errors::RuntimeError;
 use crate::value::Value;
 use aec_ast::{LimitsBlock, PermissionsBlock, PermissionsEntry, Span};
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 /// Default HTTP cap when `limits { timeout }` is not declared.
 pub const DEFAULT_HTTP_TIMEOUT_MS: u64 = 30_000;
+pub const DEFAULT_MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
 
 /// File access direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,8 +143,8 @@ impl Permissions {
 
     /// Is sending a request to this URL allowed?
     pub fn check_network(&self, url: &str) -> Result<(), String> {
-        let host = extract_host(url).ok_or_else(|| {
-            format!("network denied: cannot extract a host from URL \"{}\"", url)
+        let target = parse_network_origin(url, false).map_err(|reason| {
+            format!("network denied: invalid URL \"{}\": {}", url, reason)
         })?;
 
         let allowed = self
@@ -150,18 +152,30 @@ impl Permissions {
             .as_ref()
             .ok_or_else(|| "network denied: no `network` key declared in the permissions block".to_string())?;
 
-        let hit = allowed
-            .iter()
-            .any(|entry| extract_host_or_bare(entry) == Some(host.clone()));
+        if allowed.is_empty() {
+            return Err("network denied: the allowlist is empty (no host is permitted)".to_string());
+        }
 
-        if hit {
+        let mut origins = Vec::with_capacity(allowed.len());
+        for entry in allowed {
+            let entry = entry.trim();
+            let origin = parse_network_origin(entry, true).map_err(|reason| {
+                format!(
+                    "network denied: invalid allowlist entry \"{}\": {}",
+                    entry, reason
+                )
+            })?;
+            origins.push(origin);
+        }
+
+        if origins.contains(&target) {
             Ok(())
-        } else if allowed.is_empty() {
-            Err("network denied: the allowlist is empty (no host is permitted)".to_string())
         } else {
             Err(format!(
-                "network denied: host \"{}\" is not in the allowlist (allowed: {})",
-                host,
+                "network denied: {}://{}:{} is not in the allowlist (allowed: {})",
+                target.scheme,
+                target.host,
+                target.port,
                 allowed.join(", ")
             ))
         }
@@ -226,6 +240,7 @@ pub struct Limits {
     pub concurrency: Option<u64>,
     /// Deadline for I/O operations (currently applied to HTTP requests).
     pub timeout_ms: Option<u64>,
+    pub max_response_bytes: Option<u64>,
 }
 
 impl Limits {
@@ -243,6 +258,17 @@ impl Limits {
                     // `timeout: 500` → milliseconds
                     limits.timeout_ms = Some(*ms as u64);
                 }
+                ("max_response_bytes" | "response_bytes", aec_ast::Literal::Int(bytes))
+                    if *bytes >= 0 =>
+                {
+                    limits.max_response_bytes = Some(*bytes as u64);
+                }
+                (
+                    "max_response_bytes" | "response_bytes",
+                    aec_ast::Literal::ByteSize(bytes),
+                ) => {
+                    limits.max_response_bytes = Some(*bytes);
+                }
                 _ => {}
             }
         }
@@ -253,48 +279,137 @@ impl Limits {
     pub fn http_timeout(&self) -> Duration {
         Duration::from_millis(self.timeout_ms.unwrap_or(DEFAULT_HTTP_TIMEOUT_MS))
     }
+
+    pub fn max_response_bytes(&self) -> u64 {
+        self.max_response_bytes
+            .unwrap_or(DEFAULT_MAX_RESPONSE_BYTES)
+    }
+}
+
+pub fn build_http_client(
+    limits: &Limits,
+    restricted: bool,
+) -> Result<reqwest::blocking::Client, reqwest::Error> {
+    reqwest::blocking::Client::builder()
+        .timeout(limits.http_timeout())
+        .redirect(if restricted {
+            reqwest::redirect::Policy::none()
+        } else {
+            reqwest::redirect::Policy::default()
+        })
+        .build()
+}
+
+pub fn read_limited_response(
+    response: &mut reqwest::blocking::Response,
+    operation: &str,
+    max_bytes: u64,
+    span: Span,
+) -> Result<String, RuntimeError> {
+    if let Some(length) = response.content_length() {
+        if length > max_bytes {
+            return Err(RuntimeError::Generic {
+                message: format!(
+                    "{} response exceeds the {} byte limit",
+                    operation, max_bytes
+                ),
+                span,
+            });
+        }
+    }
+
+    let mut body = Vec::new();
+    response
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut body)
+        .map_err(|error| RuntimeError::Generic {
+            message: format!("{} failed to read response: {}", operation, error),
+            span,
+        })?;
+
+    if u64::try_from(body.len()).unwrap_or(u64::MAX) > max_bytes {
+        return Err(RuntimeError::Generic {
+            message: format!(
+                "{} response exceeds the {} byte limit",
+                operation, max_bytes
+            ),
+            span,
+        });
+    }
+
+    String::from_utf8(body).map_err(|error| RuntimeError::Generic {
+        message: format!("{} response is not valid UTF-8: {}", operation, error),
+        span,
+    })
 }
 
 fn current_dir() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// Extract the host from a URL: port and userinfo are dropped, letters lowercased.
-///
-/// A `/path` without a scheme is supported too (`example.com/x`).
-pub fn extract_host(url: &str) -> Option<String> {
-    let after_scheme = match url.split_once("://") {
-        Some((_, rest)) => rest,
-        None => url,
-    };
-    let authority = after_scheme
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default();
-    if authority.is_empty() {
-        return None;
-    }
-
-    // drop userinfo: user:pass@host
-    let authority = authority.rsplit('@').next().unwrap_or(authority);
-
-    // IPv6: [::1]:8080
-    let host = if let Some(rest) = authority.strip_prefix('[') {
-        rest.split(']').next().unwrap_or_default()
-    } else {
-        authority.split(':').next().unwrap_or_default()
-    };
-
-    if host.is_empty() {
-        None
-    } else {
-        Some(host.to_ascii_lowercase())
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NetworkOrigin {
+    scheme: String,
+    host: String,
+    port: u16,
 }
 
-/// For the allowlist: accepts both a full URL and a bare host.
-fn extract_host_or_bare(entry: &str) -> Option<String> {
-    extract_host(entry.trim())
+fn parse_network_origin(raw: &str, allow_bare: bool) -> Result<NetworkOrigin, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("URL is empty".to_string());
+    }
+    if raw.chars().any(|character| character.is_control() || character.is_whitespace()) {
+        return Err("URL contains whitespace or control characters".to_string());
+    }
+    if raw.contains('\\') {
+        return Err("URL contains a backslash".to_string());
+    }
+    if allow_bare && !trimmed.contains("://") {
+        let prefix = trimmed.split(':').next().unwrap_or_default();
+        if matches!(prefix.to_ascii_lowercase().as_str(), "http" | "https") {
+            return Err("URL scheme must include ://".to_string());
+        }
+    }
+
+    let candidate = if allow_bare && !trimmed.contains("://") {
+        format!("https://{trimmed}")
+    } else {
+        trimmed.to_string()
+    };
+    let parsed = reqwest::Url::parse(&candidate).map_err(|error| format!("invalid URL: {}", error))?;
+    let scheme = parsed.scheme().to_ascii_lowercase();
+    if scheme != "http" && scheme != "https" {
+        return Err(format!("unsupported URL scheme \"{}\"", parsed.scheme()));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("URL userinfo is not allowed".to_string());
+    }
+
+    let raw_host = parsed
+        .host_str()
+        .ok_or_else(|| "URL does not contain a host".to_string())?;
+    let host = raw_host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if host.is_empty() || host.contains('/') || host.contains('@') {
+        return Err("URL contains an invalid host".to_string());
+    }
+
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| "URL does not contain a valid port".to_string())?;
+    if port == 0 {
+        return Err("URL port must be greater than zero".to_string());
+    }
+
+    Ok(NetworkOrigin { scheme, host, port })
+}
+
+pub fn extract_host(url: &str) -> Option<String> {
+    parse_network_origin(url, true).ok().map(|origin| origin.host)
 }
 
 /// Turn a path into absolute, normalized form.

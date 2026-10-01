@@ -144,6 +144,9 @@ dependencies = [
  "anyhow",
  "clap",
  "colored",
+ "libc",
+ "ring",
+ "sha2",
 ]
 
 [[package]]
@@ -184,6 +187,8 @@ dependencies = [
  "aec-runtime",
  "eframe",
  "egui",
+ "libc",
+ "png",
 ]
 
 [[package]]

@@ -9,14 +9,15 @@ pub mod program;
 pub mod span;
 pub mod style;
 pub mod theme;
+pub mod type_decl;
 pub mod ui;
 
 pub use declarative::{SecretValue, SecretsBlock, SecretsEntry};
 pub use error::{ParseError, ParseErrorKind};
 pub use expr::{
-    Argument, ArrayExpr, AwaitExpr, BinaryExpr, BinaryOp, CallExpr, Expr, IndexExpr, LiteralExpr,
-    MatchArm, MatchBody, MatchExpr, MemberExpr, LambdaExpr, ObjectExpr, ObjectField, ParenExpr,
-    Pattern, TryExpr, UnaryExpr, UnaryOp,
+    Argument, ArrayExpr, AwaitExpr, BinaryExpr, BinaryOp, CallExpr, EnumVariantPattern, Expr,
+    IndexExpr, LiteralExpr, MatchArm, MatchBody, MatchExpr, MemberExpr, LambdaExpr, ObjectExpr,
+    ObjectField, ParenExpr, Pattern, StructPattern, StructPatternField, TryExpr, UnaryExpr, UnaryOp,
 };
 pub use function::{
     AssignOp, AssignStmt, Block, ElseBranch, ForStmt, FunctionDecl, IfStmt, LValue, LValueStep,
@@ -32,6 +33,7 @@ pub use program::{AgentHeader, Identifier, ImportStmt, Program, ResolvedImport, 
 pub use span::{Position, Span, Spanned};
 pub use style::{Style, StyleValue};
 pub use theme::{ThemeDecl, ThemeEntry, ThemeGroup};
+pub use type_decl::{EnumDecl, EnumVariantDecl, StructDecl, StructField};
 pub use ui::{
     Binding, ComponentDecl, ComponentProp, ComponentUse, ElementExpr, ElementModifier,
     ElementProperty, EventHandler, ScreenExpr, StateDeclUi, TypeRef, UiDecl, UiFor, UiIf,

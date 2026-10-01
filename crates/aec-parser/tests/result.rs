@@ -157,3 +157,62 @@ fn named_type_called_result_is_still_a_named_type() {
     };
     assert!(matches!(f.params[0].ty, TypeExpr::Named(_)));
 }
+
+fn first_function_return_type(source: &str) -> TypeExpr {
+    let program = parse(source).expect("parse should succeed");
+    let function = match &program.items[0] {
+        TopLevelItem::Function(function) => function,
+        _ => panic!("expected function"),
+    };
+    function.return_type.clone().expect("return type")
+}
+
+#[test]
+fn parses_optional_elements_inside_array_types() {
+    assert_eq!(
+        first_function_return_type("agent Test\nfn f() -> [int?] { return none }\n"),
+        TypeExpr::Array(Box::new(TypeExpr::Optional(Box::new(TypeExpr::Int))))
+    );
+}
+
+#[test]
+fn parses_optional_result_members() {
+    assert_eq!(
+        first_function_return_type("agent Test\nfn f() -> Result(int?, string) { return ok(none) }\n"),
+        TypeExpr::Result(
+            Box::new(TypeExpr::Optional(Box::new(TypeExpr::Int))),
+            Box::new(TypeExpr::String)
+        )
+    );
+}
+
+#[test]
+fn parses_deeply_nested_array_and_result_types() {
+    assert_eq!(
+        first_function_return_type(
+            "agent Test\nfn f() -> Result([int?], Result(string, [int])) { return ok([]) }\n"
+        ),
+        TypeExpr::Result(
+            Box::new(TypeExpr::Array(Box::new(TypeExpr::Optional(Box::new(
+                TypeExpr::Int
+            ))))),
+            Box::new(TypeExpr::Result(
+                Box::new(TypeExpr::String),
+                Box::new(TypeExpr::Array(Box::new(TypeExpr::Int)))
+            ))
+        )
+    );
+}
+
+#[test]
+fn preserves_optional_markers_on_nested_type_expressions() {
+    assert_eq!(
+        first_function_return_type("agent Test\nfn f() -> [Result(int?, string)?] { return [ok(1)] }\n"),
+        TypeExpr::Array(Box::new(TypeExpr::Optional(Box::new(
+            TypeExpr::Result(
+                Box::new(TypeExpr::Optional(Box::new(TypeExpr::Int))),
+                Box::new(TypeExpr::String)
+            )
+        ))))
+    );
+}

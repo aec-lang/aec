@@ -186,6 +186,7 @@ impl WidgetStyle {
             Some(StyleValue::Float(f)) => Some(*f),
             Some(StyleValue::Int(n)) => Some(*n as f64),
             Some(StyleValue::String(s)) => s.parse().ok(),
+            Some(StyleValue::Ident(s)) => s.parse().ok(),
             _ => None,
         }
     }
@@ -193,6 +194,11 @@ impl WidgetStyle {
     pub fn get_bool(&self, name: &str) -> Option<bool> {
         match self.properties.get(name) {
             Some(StyleValue::Bool(b)) => Some(*b),
+            Some(StyleValue::String(s)) | Some(StyleValue::Ident(s)) => match s.as_str() {
+                "true" => Some(true),
+                "false" => Some(false),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -209,6 +215,19 @@ pub struct EventAction {
     pub handler: Expr,
     pub span: Span,
     pub scope: Option<String>,
+}
+
+/// One editing operation against a bound input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InputEdit {
+    /// Append text, as a paste or a typed character would.
+    Insert(String),
+    /// Remove the character before the caret.
+    Backspace,
+    /// Remove the character at the caret.
+    Delete,
+    /// Empty the field.
+    Clear,
 }
 
 #[derive(Debug, Clone)]
@@ -281,20 +300,29 @@ impl UiValue {
             UiValue::Int(n) => n.to_string(),
             UiValue::Float(f) => f.to_string(),
             UiValue::Bool(b) => b.to_string(),
-            UiValue::Array(_) => "[array]".to_string(),
-            UiValue::Object(_) => "[object]".to_string(),
+            UiValue::Array(values) => format!(
+                "[{}]",
+                values
+                    .iter()
+                    .map(UiValue::as_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            UiValue::Object(values) => {
+                let mut fields = values.iter().collect::<Vec<_>>();
+                fields.sort_by_key(|(key, _)| *key);
+                let fields = fields
+                    .into_iter()
+                    .map(|(key, value)| format!("{}: {}", key, value.as_string()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{{{}}}", fields)
+            }
         }
     }
 
     pub fn as_bool(&self) -> bool {
-        match self {
-            UiValue::None => false,
-            UiValue::Bool(b) => *b,
-            UiValue::String(s) => !s.is_empty(),
-            UiValue::Int(n) => *n != 0,
-            UiValue::Float(n) => *n != 0.0,
-            _ => false,
-        }
+        self.is_truthy()
     }
 
     pub fn as_array(&self) -> Vec<UiValue> {
@@ -312,7 +340,7 @@ impl UiValue {
             UiValue::Float(value) => *value != 0.0,
             UiValue::Bool(value) => *value,
             UiValue::Array(value) => !value.is_empty(),
-            UiValue::Object(value) => !value.is_empty(),
+            UiValue::Object(_) => true,
         }
     }
 }
@@ -348,9 +376,30 @@ impl UiState {
     }
 
     fn get_scoped_value(&self, scope: Option<&str>, name: &str) -> Option<&UiValue> {
-        let key = scope.map(|scope| Self::scoped_key(scope, name));
-        key.and_then(|key| self.values.get(&key))
-            .or_else(|| self.values.get(name))
+        let mut current = scope;
+        while let Some(scope) = current {
+            if let Some(value) = self.values.get(&Self::scoped_key(scope, name)) {
+                return Some(value);
+            }
+            current = scope.rsplit_once('/').map(|(parent, _)| parent);
+        }
+        self.values.get(name)
+    }
+
+    fn resolve_scoped_key(&self, scope: Option<&str>, name: &str) -> String {
+        let mut current = scope;
+        while let Some(scope) = current {
+            let key = Self::scoped_key(scope, name);
+            if self.values.contains_key(&key) {
+                return key;
+            }
+            current = scope.rsplit_once('/').map(|(parent, _)| parent);
+        }
+        if self.values.contains_key(name) || scope.is_none() {
+            name.to_string()
+        } else {
+            state_key(scope, name)
+        }
     }
 
     fn set_scoped_value(&mut self, scope: Option<&str>, name: &str, value: UiValue) {
@@ -359,11 +408,9 @@ impl UiState {
     }
 
     fn retain_scopes(&mut self, active: &HashSet<String>) {
-        self.values.retain(|key, _| {
-            !key.contains("::")
-                || active
-                    .iter()
-                    .any(|scope| key.starts_with(&format!("{}::", scope)))
+        self.values.retain(|key, _| match key.rsplit_once("::") {
+            Some((scope, _)) => active.contains(scope),
+            None => true,
         });
     }
 }
@@ -382,7 +429,7 @@ struct BuildCtx<'a> {
     active: HashSet<String>,
     scope: Option<String>,
     module: Option<String>,
-    next_scope: usize,
+    path: Vec<usize>,
     used_scopes: HashSet<String>,
 }
 
@@ -425,7 +472,7 @@ fn build_widgets_full(
         active: HashSet::new(),
         scope: None,
         module: None,
-        next_scope: 0,
+        path: Vec::new(),
         used_scopes: HashSet::new(),
     };
     let widgets = build_widgets_in_context(statements, state, &mut ctx);
@@ -449,8 +496,11 @@ fn build_widgets_in_context(
     }
 
     let mut widgets = Vec::new();
-    for statement in statements {
-        if let Some(widget) = build_widget_in_context(statement, state, ctx) {
+    for (index, statement) in statements.iter().enumerate() {
+        ctx.path.push(index);
+        let widget = build_widget_in_context(statement, state, ctx);
+        ctx.path.pop();
+        if let Some(widget) = widget {
             widgets.push(widget);
         }
     }
@@ -505,18 +555,20 @@ fn build_component_in_context(
     } else {
         ctx.module.clone()
     };
-    let identity = format!(
-        "{}::{}",
-        module.as_deref().unwrap_or_default(),
-        declaration.name.name
-    );
+    let identity = module
+        .as_deref()
+        .map(|module| format!("{}::{}", module, declaration.name.name))
+        .unwrap_or_else(|| declaration.name.name.clone());
     if !ctx.active.insert(identity.clone()) {
         return None;
     }
 
     let result = declaration.render.as_ref().map(|body| {
-        let scope = format!("component:{}:{}", identity, ctx.next_scope);
-        ctx.next_scope += 1;
+        let path = current_path(ctx);
+        let scope = child_scope(
+            ctx.scope.as_deref(),
+            &format!("component:{}@{}", identity.replace("::", "-"), path),
+        );
         ctx.used_scopes.insert(scope.clone());
         let previous_scope = ctx.scope.replace(scope.clone());
         let previous_module = ctx.module.clone();
@@ -538,16 +590,18 @@ fn build_component_in_context(
 fn build_if_in_context(ui_if: &UiIf, state: &mut UiState, ctx: &mut BuildCtx) -> Widget {
     let condition = eval_condition(&ui_if.condition, state, ctx.scope.as_deref());
     if condition {
+        let then_branch = build_widgets_in_context(&ui_if.then_body, state, ctx);
         Widget::If {
             condition: true,
-            then_branch: build_widgets_in_context(&ui_if.then_body, state, ctx),
+            then_branch,
             else_branch: None,
         }
     } else if let Some(else_body) = &ui_if.else_body {
+        let else_branch = build_widgets_in_context(else_body, state, ctx);
         Widget::If {
             condition: false,
             then_branch: vec![],
-            else_branch: Some(build_widgets_in_context(else_body, state, ctx)),
+            else_branch: Some(else_branch),
         }
     } else {
         Widget::If {
@@ -560,10 +614,13 @@ fn build_if_in_context(ui_if: &UiIf, state: &mut UiState, ctx: &mut BuildCtx) ->
 
 fn build_for_in_context(ui_for: &UiFor, state: &mut UiState, ctx: &mut BuildCtx) -> Widget {
     let items = expr_to_value(&ui_for.iterable, state, ctx.scope.as_deref()).as_array();
+    let path = current_path(ctx);
     let mut all_widgets = Vec::new();
     for (index, item) in items.into_iter().enumerate() {
-        let scope = format!("loop:{}:{}:{}", ui_for.variable.name, index, ctx.next_scope);
-        ctx.next_scope += 1;
+        let scope = child_scope(
+            ctx.scope.as_deref(),
+            &format!("loop:{}@{}:{}", ui_for.variable.name, path, index),
+        );
         ctx.used_scopes.insert(scope.clone());
         let previous_scope = ctx.scope.replace(scope.clone());
         state.set_scoped_value(Some(&scope), &ui_for.variable.name, item);
@@ -577,8 +634,24 @@ fn build_for_in_context(ui_for: &UiFor, state: &mut UiState, ctx: &mut BuildCtx)
     }
 }
 
+fn current_path(ctx: &BuildCtx<'_>) -> String {
+    ctx.path
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn child_scope(parent: Option<&str>, segment: &str) -> String {
+    parent
+        .map(|parent| format!("{parent}/{segment}"))
+        .unwrap_or_else(|| segment.to_string())
+}
+
 fn state_key(scope: Option<&str>, name: &str) -> String {
-    scope.map(|scope| format!("{}::{}", scope, name)).unwrap_or_else(|| name.to_string())
+    scope
+        .map(|scope| format!("{}::{}", scope, name))
+        .unwrap_or_else(|| name.to_string())
 }
 
 fn eval_interpolated(
@@ -600,7 +673,17 @@ fn eval_condition(expr: &Expr, state: &UiState, scope: Option<&str>) -> bool {
 }
 
 fn eval_text_expr(expr: &Expr, state: &UiState, scope: Option<&str>) -> String {
-    eval_ui_value(expr, state, scope).as_string()
+    interpolation_text(&eval_ui_value(expr, state, scope))
+}
+
+fn interpolation_text(value: &UiValue) -> String {
+    match value {
+        UiValue::Object(values) => values
+            .get("text")
+            .map(interpolation_text)
+            .unwrap_or_else(|| value.as_string()),
+        _ => value.as_string(),
+    }
 }
 
 fn expr_to_string(expr: &Expr, state: &UiState, scope: Option<&str>) -> Option<String> {
@@ -626,9 +709,12 @@ fn eval_ui_value(expr: &Expr, state: &UiState, scope: Option<&str>) -> UiValue {
             aec_ast::Literal::Bool(value) => UiValue::Bool(*value),
             aec_ast::Literal::Uuid(value) => UiValue::String(value.to_string()),
             aec_ast::Literal::ByteSize(value) => UiValue::Int(*value as i64),
-            aec_ast::Literal::Duration(value) => {
-                UiValue::Int(value.value.saturating_mul(value.unit.to_ms()) as i64)
-            }
+            aec_ast::Literal::Duration(value) => value
+                .value
+                .checked_mul(value.unit.to_ms())
+                .and_then(|value| i64::try_from(value).ok())
+                .map(UiValue::Int)
+                .unwrap_or(UiValue::None),
         },
         Expr::Identifier(identifier) => state
             .get_scoped_value(scope, &identifier.name)
@@ -657,7 +743,7 @@ fn eval_ui_value(expr: &Expr, state: &UiState, scope: Option<&str>) -> UiValue {
             match unary.op {
                 aec_ast::UnaryOp::Not => UiValue::Bool(!value.is_truthy()),
                 aec_ast::UnaryOp::Neg => match value {
-                    UiValue::Int(value) => UiValue::Int(value.saturating_neg()),
+                    UiValue::Int(value) => value.checked_neg().map(UiValue::Int).unwrap_or(UiValue::None),
                     UiValue::Float(value) => UiValue::Float(-value),
                     _ => UiValue::None,
                 },
@@ -708,20 +794,30 @@ fn eval_ui_value(expr: &Expr, state: &UiState, scope: Option<&str>) -> UiValue {
 }
 
 fn eval_ui_call(call: &aec_ast::CallExpr, state: &UiState, scope: Option<&str>) -> UiValue {
-    let name = match &call.callee {
-        Expr::Identifier(identifier) => identifier.name.clone(),
-        Expr::Member(member) => match &member.object {
-            Expr::Identifier(namespace) => format!("{}.{}", namespace.name, member.property.name),
-            _ => return UiValue::None,
-        },
-        _ => return UiValue::None,
+    let Some(name) = expr_token_path(&call.callee) else {
+        return UiValue::None;
+    };
+    let name = match name.as_str() {
+        "math_floor" => "floor",
+        "math_ceil" => "ceil",
+        "math_round" => "round",
+        "math_sqrt" => "sqrt",
+        "math_pow" => "pow",
+        "math_sin" | "sin" => "sin",
+        "math_cos" | "cos" => "cos",
+        "math_tan" | "tan" => "tan",
+        "math_log" | "log" => "log",
+        "math_log10" | "log10" => "log10",
+        "math_exp" | "exp" => "exp",
+        _ => name.as_str(),
     };
     let args: Vec<UiValue> = call
         .args
         .iter()
         .map(|argument| eval_ui_value(&argument.value, state, scope))
         .collect();
-    match name.as_str() {
+
+    match name {
         "range" => {
             let (start, end) = match args.as_slice() {
                 [UiValue::Int(end)] => (0, *end),
@@ -733,27 +829,35 @@ fn eval_ui_call(call: &aec_ast::CallExpr, state: &UiState, scope: Option<&str>) 
             }
             UiValue::Array((start..end).map(UiValue::Int).collect())
         }
-        "len" => match args.first() {
-            Some(UiValue::String(value)) => UiValue::Int(value.chars().count() as i64),
-            Some(UiValue::Array(value)) => UiValue::Int(value.len() as i64),
-            Some(UiValue::Object(value)) => UiValue::Int(value.len() as i64),
+        "len" => match args.as_slice() {
+            [UiValue::String(value)] => UiValue::Int(value.len() as i64),
+            [UiValue::Array(value)] => UiValue::Int(value.len() as i64),
+            [UiValue::Object(value)] => UiValue::Int(value.len() as i64),
             _ => UiValue::None,
         },
-        "str" => args.first().map(|value| UiValue::String(value.as_string())).unwrap_or(UiValue::None),
-        "int" => match args.first() {
-            Some(UiValue::Int(value)) => UiValue::Int(*value),
-            Some(UiValue::Float(value)) => UiValue::Int(*value as i64),
-            Some(UiValue::String(value)) => value.parse().map(UiValue::Int).unwrap_or(UiValue::None),
+        "bool" => match args.as_slice() {
+            [UiValue::String(value)] => UiValue::Bool(value.eq_ignore_ascii_case("true")),
+            [value] => UiValue::Bool(value.is_truthy()),
             _ => UiValue::None,
         },
-        "float" => match args.first() {
-            Some(UiValue::Int(value)) => UiValue::Float(*value as f64),
-            Some(UiValue::Float(value)) => UiValue::Float(*value),
-            Some(UiValue::String(value)) => value.parse().map(UiValue::Float).unwrap_or(UiValue::None),
+        "str" => match args.as_slice() {
+            [value] => UiValue::String(value.as_string()),
             _ => UiValue::None,
         },
-        "upper" | "lower" | "trim" => match args.first() {
-            Some(UiValue::String(value)) => UiValue::String(match name.as_str() {
+        "int" => match args.as_slice() {
+            [UiValue::Int(value)] => UiValue::Int(*value),
+            [UiValue::Float(value)] => UiValue::Int(*value as i64),
+            [UiValue::String(value)] => value.parse().map(UiValue::Int).unwrap_or(UiValue::None),
+            _ => UiValue::None,
+        },
+        "float" => match args.as_slice() {
+            [UiValue::Int(value)] => UiValue::Float(*value as f64),
+            [UiValue::Float(value)] => UiValue::Float(*value),
+            [UiValue::String(value)] => value.parse().map(UiValue::Float).unwrap_or(UiValue::None),
+            _ => UiValue::None,
+        },
+        "upper" | "lower" | "trim" => match args.as_slice() {
+            [UiValue::String(value)] => UiValue::String(match name {
                 "upper" => value.to_uppercase(),
                 "lower" => value.to_lowercase(),
                 _ => value.trim().to_string(),
@@ -762,17 +866,93 @@ fn eval_ui_call(call: &aec_ast::CallExpr, state: &UiState, scope: Option<&str>) 
         },
         "split" => match args.as_slice() {
             [UiValue::String(value), UiValue::String(separator)] => UiValue::Array(
-                value.split(separator.as_str()).map(|part| UiValue::String(part.to_string())).collect(),
+                value
+                    .split(separator.as_str())
+                    .map(|part| UiValue::String(part.to_string()))
+                    .collect(),
             ),
             _ => UiValue::None,
         },
-        "first" | "last" => match args.first() {
-            Some(UiValue::Array(values)) => {
+        "join" => match args.as_slice() {
+            [UiValue::Array(values), UiValue::String(separator)] => UiValue::String(
+                values
+                    .iter()
+                    .map(UiValue::as_string)
+                    .collect::<Vec<_>>()
+                    .join(separator),
+            ),
+            _ => UiValue::None,
+        },
+        "contains" => match args.as_slice() {
+            [UiValue::String(value), UiValue::String(needle)] => {
+                UiValue::Bool(value.contains(needle.as_str()))
+            }
+            _ => UiValue::None,
+        },
+        "starts_with" => match args.as_slice() {
+            [UiValue::String(value), UiValue::String(prefix)] => {
+                UiValue::Bool(value.starts_with(prefix.as_str()))
+            }
+            _ => UiValue::None,
+        },
+        "ends_with" => match args.as_slice() {
+            [UiValue::String(value), UiValue::String(suffix)] => {
+                UiValue::Bool(value.ends_with(suffix.as_str()))
+            }
+            _ => UiValue::None,
+        },
+        "replace" => match args.as_slice() {
+            [UiValue::String(value), UiValue::String(from), UiValue::String(to)] => {
+                UiValue::String(value.replace(from.as_str(), to.as_str()))
+            }
+            _ => UiValue::None,
+        },
+        "repeat" => match args.as_slice() {
+            [UiValue::String(value), UiValue::Int(count)] if *count >= 0 => {
+                let Ok(count) = usize::try_from(*count) else {
+                    return UiValue::None;
+                };
+                if count.saturating_mul(value.chars().count()) > 10_000_000 {
+                    UiValue::None
+                } else {
+                    UiValue::String(value.repeat(count))
+                }
+            }
+            _ => UiValue::None,
+        },
+        "char_at" => match args.as_slice() {
+            [UiValue::String(value), UiValue::Int(index)] => {
+                let characters: Vec<char> = value.chars().collect();
+                let index = if *index < 0 {
+                    characters.len() as i64 + index
+                } else {
+                    *index
+                };
+                if index < 0 || index as usize >= characters.len() {
+                    UiValue::None
+                } else {
+                    UiValue::String(characters[index as usize].to_string())
+                }
+            }
+            _ => UiValue::None,
+        },
+        "first" | "last" => match args.as_slice() {
+            [UiValue::Array(values)] => {
                 if name == "first" {
                     values.first().cloned().unwrap_or(UiValue::None)
                 } else {
                     values.last().cloned().unwrap_or(UiValue::None)
                 }
+            }
+            [UiValue::String(value)] => {
+                let character = if name == "first" {
+                    value.chars().next()
+                } else {
+                    value.chars().next_back()
+                };
+                character
+                    .map(|value| UiValue::String(value.to_string()))
+                    .unwrap_or(UiValue::None)
             }
             _ => UiValue::None,
         },
@@ -784,21 +964,151 @@ fn eval_ui_call(call: &aec_ast::CallExpr, state: &UiState, scope: Option<&str>) 
             }
             _ => UiValue::None,
         },
-        "pop" => match args.first() {
-            Some(UiValue::Array(values)) => values.last().cloned().unwrap_or(UiValue::None),
+        "pop" => match args.as_slice() {
+            [UiValue::Array(values)] => values.last().cloned().unwrap_or(UiValue::None),
             _ => UiValue::None,
         },
-        "abs" => match args.first() {
-            Some(UiValue::Int(value)) => UiValue::Int(value.saturating_abs()),
-            Some(UiValue::Float(value)) => UiValue::Float(value.abs()),
+        "sort" => match args.as_slice() {
+            [UiValue::Array(values)] => {
+                let mut values = values.clone();
+                values.sort_by(ui_value_order);
+                UiValue::Array(values)
+            }
             _ => UiValue::None,
         },
+        "reverse" => match args.as_slice() {
+            [UiValue::Array(values)] => {
+                let mut values = values.clone();
+                values.reverse();
+                UiValue::Array(values)
+            }
+            [UiValue::String(value)] => UiValue::String(value.chars().rev().collect()),
+            _ => UiValue::None,
+        },
+        "slice" => match args.as_slice() {
+            [value, UiValue::Int(start), UiValue::Int(end)] => {
+                ui_slice(value, *start, Some(&UiValue::Int(*end)))
+            }
+            [value, UiValue::Int(start)] => ui_slice(value, *start, None),
+            _ => UiValue::None,
+        },
+        "keys" => match args.as_slice() {
+            [UiValue::Object(values)] => {
+                let mut keys = values.keys().cloned().collect::<Vec<_>>();
+                keys.sort();
+                UiValue::Array(keys.into_iter().map(UiValue::String).collect())
+            }
+            _ => UiValue::None,
+        },
+        "values" => match args.as_slice() {
+            [UiValue::Object(values)] => {
+                let mut values = values.iter().collect::<Vec<_>>();
+                values.sort_by_key(|(key, _)| *key);
+                UiValue::Array(
+                    values
+                        .into_iter()
+                        .map(|(_, value)| value.clone())
+                        .collect(),
+                )
+            }
+            _ => UiValue::None,
+        },
+        "has" => match args.as_slice() {
+            [UiValue::Object(values), UiValue::String(key)] => {
+                UiValue::Bool(values.contains_key(key))
+            }
+            _ => UiValue::None,
+        },
+        "abs" => match args.as_slice() {
+            [UiValue::Int(value)] => value.checked_abs().map(UiValue::Int).unwrap_or(UiValue::None),
+            [UiValue::Float(value)] => UiValue::Float(value.abs()),
+            _ => UiValue::None,
+        },
+        "sqrt" => ui_number(args.first())
+            .map(|value| UiValue::Float(value.sqrt()))
+            .unwrap_or(UiValue::None),
+        "floor" | "ceil" | "round" => match ui_number(args.first()) {
+            Some(value) if name == "floor" => UiValue::Int(value.floor() as i64),
+            Some(value) if name == "ceil" => UiValue::Int(value.ceil() as i64),
+            Some(value) => UiValue::Int(value.round() as i64),
+            None => UiValue::None,
+        },
+        "sin" | "cos" | "tan" | "log" | "log10" | "exp" => {
+            let Some(value) = ui_number(args.first()) else {
+                return UiValue::None;
+            };
+            UiValue::Float(match name {
+                "sin" => value.sin(),
+                "cos" => value.cos(),
+                "tan" => value.tan(),
+                "log" => value.ln(),
+                "log10" => value.log10(),
+                _ => value.exp(),
+            })
+        }
         "min" | "max" => match args.as_slice() {
-            [UiValue::Int(left), UiValue::Int(right)] => UiValue::Int(if name == "min" { *left.min(right) } else { *left.max(right) }),
-            [UiValue::Float(left), UiValue::Float(right)] => UiValue::Float(if name == "min" { left.min(*right) } else { left.max(*right) }),
+            [UiValue::Int(left), UiValue::Int(right)] => {
+                UiValue::Int(if name == "min" { *left.min(right) } else { *left.max(right) })
+            }
+            [UiValue::Float(left), UiValue::Float(right)] => {
+                UiValue::Float(if name == "min" { left.min(*right) } else { left.max(*right) })
+            }
+            _ => UiValue::None,
+        },
+        "pow" => match args.as_slice() {
+            [UiValue::Int(base), UiValue::Int(exponent)] if *exponent >= 0 => exponent
+                .to_owned()
+                .try_into()
+                .ok()
+                .and_then(|exponent| base.checked_pow(exponent))
+                .map(UiValue::Int)
+                .unwrap_or(UiValue::None),
+            [UiValue::Float(base), UiValue::Float(exponent)] => UiValue::Float(base.powf(*exponent)),
             _ => UiValue::None,
         },
         _ => UiValue::None,
+    }
+}
+
+fn ui_number(value: Option<&UiValue>) -> Option<f64> {
+    match value? {
+        UiValue::Int(value) => Some(*value as f64),
+        UiValue::Float(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn ui_slice(value: &UiValue, start: i64, end: Option<&UiValue>) -> UiValue {
+    if start < 0 || matches!(end, Some(UiValue::Int(value)) if *value < 0) {
+        return UiValue::None;
+    }
+    let end = match end {
+        Some(UiValue::Int(value)) => Some(*value as usize),
+        Some(_) => return UiValue::None,
+        None => None,
+    };
+    let start = start as usize;
+    match value {
+        UiValue::Array(values) => {
+            let end = end.unwrap_or(usize::MAX).min(values.len()).max(start);
+            UiValue::Array(values[start.min(end)..end].to_vec())
+        }
+        UiValue::String(value) => {
+            let characters = value.chars().collect::<Vec<_>>();
+            let end = end.unwrap_or(usize::MAX).min(characters.len()).max(start);
+            UiValue::String(characters[start.min(end)..end].iter().collect())
+        }
+        _ => UiValue::None,
+    }
+}
+
+fn ui_value_order(left: &UiValue, right: &UiValue) -> std::cmp::Ordering {
+    match (left, right) {
+        (UiValue::Int(left), UiValue::Int(right)) => left.cmp(right),
+        (UiValue::Float(left), UiValue::Float(right)) => left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal),
+        (UiValue::String(left), UiValue::String(right)) => left.cmp(right),
+        (UiValue::Bool(left), UiValue::Bool(right)) => left.cmp(right),
+        _ => left.as_string().cmp(&right.as_string()),
     }
 }
 
@@ -822,32 +1132,14 @@ fn ui_binary(op: aec_ast::BinaryOp, left: UiValue, right: UiValue) -> UiValue {
             _ => UiValue::None,
         },
         BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-            match (left, right) {
-                (UiValue::Int(left), UiValue::Int(right)) => {
-                    let result = match op {
-                        BinaryOp::Sub => left.checked_sub(right),
-                        BinaryOp::Mul => left.checked_mul(right),
-                        BinaryOp::Div if right != 0 => left.checked_div(right),
-                        BinaryOp::Mod if right != 0 => left.checked_rem(right),
-                        _ => None,
-                    };
-                    result.map(UiValue::Int).unwrap_or(UiValue::None)
-                }
-                (UiValue::Float(left), UiValue::Float(right)) => UiValue::Float(match op {
-                    BinaryOp::Sub => left - right,
-                    BinaryOp::Mul => left * right,
-                    BinaryOp::Div if right != 0.0 => left / right,
-                    BinaryOp::Mod if right != 0.0 => left % right,
-                    _ => return UiValue::None,
-                }),
-                _ => UiValue::None,
-            }
+            ui_numeric_binary(op, left, right)
         }
         BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Lte | BinaryOp::Gte => {
             let ordering = match (&left, &right) {
                 (UiValue::Int(left), UiValue::Int(right)) => left.partial_cmp(right),
                 (UiValue::Float(left), UiValue::Float(right)) => left.partial_cmp(right),
-                (UiValue::String(left), UiValue::String(right)) => Some(left.cmp(right)),
+                (UiValue::Int(left), UiValue::Float(right)) => (*left as f64).partial_cmp(right),
+                (UiValue::Float(left), UiValue::Int(right)) => left.partial_cmp(&(*right as f64)),
                 _ => None,
             };
             let Some(ordering) = ordering else { return UiValue::Bool(false) };
@@ -859,6 +1151,32 @@ fn ui_binary(op: aec_ast::BinaryOp, left: UiValue, right: UiValue) -> UiValue {
                 _ => false,
             })
         }
+    }
+}
+
+fn ui_numeric_binary(op: aec_ast::BinaryOp, left: UiValue, right: UiValue) -> UiValue {
+    if let (UiValue::Int(left), UiValue::Int(right)) = (&left, &right) {
+        let result = match op {
+            aec_ast::BinaryOp::Sub => left.checked_sub(*right),
+            aec_ast::BinaryOp::Mul => left.checked_mul(*right),
+            aec_ast::BinaryOp::Div if *right != 0 => left.checked_div(*right),
+            aec_ast::BinaryOp::Mod if *right != 0 => left.checked_rem(*right),
+            _ => None,
+        };
+        return result.map(UiValue::Int).unwrap_or(UiValue::None);
+    }
+    let (left, right) = match (left, right) {
+        (UiValue::Int(value), UiValue::Float(right)) => (value as f64, right),
+        (UiValue::Float(left), UiValue::Int(right)) => (left, right as f64),
+        (UiValue::Float(left), UiValue::Float(right)) => (left, right),
+        _ => return UiValue::None,
+    };
+    match op {
+        aec_ast::BinaryOp::Sub => UiValue::Float(left - right),
+        aec_ast::BinaryOp::Mul => UiValue::Float(left * right),
+        aec_ast::BinaryOp::Div if right != 0.0 => UiValue::Float(left / right),
+        aec_ast::BinaryOp::Mod if right != 0.0 => UiValue::Float(left % right),
+        _ => UiValue::None,
     }
 }
 
@@ -904,21 +1222,21 @@ fn build_element_in_context(el: &ElementExpr, state: &mut UiState, ctx: &mut Bui
                 .as_ref()
                 .map(|children| build_widgets_in_context(children, state, ctx))
                 .unwrap_or_default(),
-            ws,
+            apply_layout_defaults(ws, ctx.theme),
         ),
         "Row" => Widget::Row(
             el.children
                 .as_ref()
                 .map(|children| build_widgets_in_context(children, state, ctx))
                 .unwrap_or_default(),
-            ws,
+            apply_layout_defaults(ws, ctx.theme),
         ),
         "Card" => Widget::Card(
             el.children
                 .as_ref()
                 .map(|children| build_widgets_in_context(children, state, ctx))
                 .unwrap_or_default(),
-            apply_surface_default(ws, ctx.theme),
+            apply_card_defaults(ws, ctx.theme),
         ),
         "Text" => Widget::Text(
             el.primary_arg
@@ -933,7 +1251,9 @@ fn build_element_in_context(el: &ElementExpr, state: &mut UiState, ctx: &mut Bui
                 .primary_arg
                 .as_ref()
                 .and_then(|argument| match argument {
-                    Expr::Identifier(identifier) => Some(state_key(scope.as_deref(), &identifier.name)),
+                        Expr::Identifier(identifier) => Some(
+                            state.resolve_scoped_key(scope.as_deref(), &identifier.name),
+                        ),
                     _ => None,
                 })
                 .unwrap_or_default();
@@ -954,7 +1274,9 @@ fn build_element_in_context(el: &ElementExpr, state: &mut UiState, ctx: &mut Bui
             for modifier in &el.modifiers {
                 match modifier {
                     ElementModifier::Binding(binding) => {
-                        bind_target = Some(state_key(scope.as_deref(), &binding.target.name));
+                        bind_target = Some(
+                            state.resolve_scoped_key(scope.as_deref(), &binding.target.name),
+                        );
                     }
                     ElementModifier::Property(property) if property.name.name == "placeholder" => {
                         placeholder = expr_to_string(&property.value, state, scope.as_deref());
@@ -971,7 +1293,7 @@ fn build_element_in_context(el: &ElementExpr, state: &mut UiState, ctx: &mut Bui
                 bind_target,
                 placeholder,
                 value,
-                style: ws,
+                style: apply_input_defaults(ws, ctx.theme),
             }
         }
         "Button" => {
@@ -991,7 +1313,7 @@ fn build_element_in_context(el: &ElementExpr, state: &mut UiState, ctx: &mut Bui
             Widget::Button {
                 label,
                 on_click,
-                style: ws,
+                style: apply_button_defaults(ws, ctx.theme),
             }
         }
         "Messages" => {
@@ -1001,13 +1323,18 @@ fn build_element_in_context(el: &ElementExpr, state: &mut UiState, ctx: &mut Bui
                         && matches!(&property.value, Expr::Identifier(_)) =>
                 {
                     match &property.value {
-                        Expr::Identifier(identifier) => Some(state_key(scope.as_deref(), &identifier.name)),
+                    Expr::Identifier(identifier) => Some(
+                        state.resolve_scoped_key(scope.as_deref(), &identifier.name),
+                    ),
                         _ => None,
                     }
                 }
                 _ => None,
             }).unwrap_or_default();
-            Widget::MessagesList { source, style: ws }
+            Widget::MessagesList {
+                source,
+                style: apply_messages_defaults(ws, ctx.theme),
+            }
         }
         _ => Widget::Container(
             el.children
@@ -1107,24 +1434,12 @@ fn expr_to_style_value(
     scope: Option<&str>,
     state: &UiState,
 ) -> Option<StyleValue> {
-    match expr {
-        Expr::Literal(literal) => match &literal.value {
-            aec_ast::Literal::String(value) | aec_ast::Literal::RawString(value) => {
-                Some(StyleValue::String(value.clone()))
-            }
-            aec_ast::Literal::Int(value) => Some(StyleValue::Int(*value)),
-            aec_ast::Literal::Float(value) => Some(StyleValue::Float(*value)),
-            aec_ast::Literal::Bool(value) => Some(StyleValue::Bool(*value)),
-            _ => None,
-        },
-        Expr::Identifier(_) => ui_value_to_style(expr_to_value(expr, state, scope)),
-        Expr::Member(_) => {
-            let path = expr_token_path(expr)?;
-            resolve_style_value(&StyleValue::Ident(path), themes, theme, module)
-                .or_else(|| ui_value_to_style(expr_to_value(expr, state, scope)))
+    if let Some(path) = expr_token_path(expr) {
+        if path == "theme" || path.starts_with("theme.") {
+            return resolve_style_value(&StyleValue::Ident(path), themes, theme, module);
         }
-        _ => None,
     }
+    ui_value_to_style(expr_to_value(expr, state, scope))
 }
 
 fn expr_token_path(expr: &Expr) -> Option<String> {
@@ -1140,23 +1455,85 @@ fn expr_token_path(expr: &Expr) -> Option<String> {
 }
 
 fn apply_text_defaults(mut style: WidgetStyle, theme: &ResolvedTheme) -> WidgetStyle {
-    for (property, token) in [("color", "color.text"), ("size", "text.size"), ("weight", "text.weight")] {
-        if !style.properties.contains_key(property) {
-            if let Some(value) = theme.get(token) {
-                style.properties.insert(property.to_string(), value.clone());
-            }
-        }
+    for (property, token) in [
+        ("color", "color.text"),
+        ("size", "text.size"),
+        ("weight", "text.weight"),
+    ] {
+        apply_theme_default(&mut style, property, theme, &[token]);
+    }
+    style
+}
+
+fn apply_layout_defaults(mut style: WidgetStyle, theme: &ResolvedTheme) -> WidgetStyle {
+    for (property, tokens) in [
+        ("spacing", &["spacing.md", "layout.spacing", "spacing.default"][..]),
+        ("margin", &["layout.margin", "spacing.margin"][..]),
+        (
+            "min_width",
+            &["layout.min_width", "size.min_width", "spacing.min_width"][..],
+        ),
+    ] {
+        apply_theme_default(&mut style, property, theme, tokens);
     }
     style
 }
 
 fn apply_surface_default(mut style: WidgetStyle, theme: &ResolvedTheme) -> WidgetStyle {
-    if !style.properties.contains_key("background") {
-        if let Some(value) = theme.get("color.surface") {
-            style.properties.insert("background".to_string(), value.clone());
-        }
-    }
+    apply_theme_default(
+        &mut style,
+        "background",
+        theme,
+        &["color.surface", "surface.background"],
+    );
     style
+}
+
+fn apply_shape_default(mut style: WidgetStyle, theme: &ResolvedTheme) -> WidgetStyle {
+    apply_theme_default(
+        &mut style,
+        "radius",
+        theme,
+        &["shape.radius", "radius.default"],
+    );
+    style
+}
+
+fn apply_card_defaults(style: WidgetStyle, theme: &ResolvedTheme) -> WidgetStyle {
+    let style = apply_surface_default(style, theme);
+    let style = apply_layout_defaults(style, theme);
+    apply_shape_default(style, theme)
+}
+
+fn apply_button_defaults(style: WidgetStyle, theme: &ResolvedTheme) -> WidgetStyle {
+    let style = apply_text_defaults(style, theme);
+    let style = apply_layout_defaults(style, theme);
+    apply_shape_default(style, theme)
+}
+
+fn apply_input_defaults(style: WidgetStyle, theme: &ResolvedTheme) -> WidgetStyle {
+    let style = apply_text_defaults(style, theme);
+    let style = apply_layout_defaults(style, theme);
+    apply_shape_default(style, theme)
+}
+
+fn apply_messages_defaults(style: WidgetStyle, theme: &ResolvedTheme) -> WidgetStyle {
+    let style = apply_text_defaults(style, theme);
+    apply_layout_defaults(style, theme)
+}
+
+fn apply_theme_default(
+    style: &mut WidgetStyle,
+    property: &str,
+    theme: &ResolvedTheme,
+    tokens: &[&str],
+) {
+    if style.properties.contains_key(property) {
+        return;
+    }
+    if let Some(value) = tokens.iter().find_map(|token| theme.get(token)) {
+        style.properties.insert(property.to_string(), value.clone());
+    }
 }
 
 #[cfg(test)]

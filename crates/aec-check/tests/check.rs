@@ -1,3 +1,4 @@
+use aec_ast::ResolvedImport;
 use aec_check::{check_program, DiagKind, Diagnostic};
 use pretty_assertions::assert_eq;
 
@@ -63,7 +64,8 @@ fn indexing_known_non_collection_reports_error() {
 
 #[test]
 fn string_indexing_remains_valid() {
-    let source = "agent Test\nfn main() -> int {\n    let letter: string = \"abc\"[0]\n    return 0\n}\n";
+    let source =
+        "agent Test\nfn main() -> int {\n    let letter: string = \"abc\"[0]\n    return 0\n}\n";
     assert_eq!(errors(source), Vec::new());
 }
 
@@ -351,7 +353,8 @@ fn calling_a_lambda_binding_is_not_an_error() {
 
 #[test]
 fn a_lambda_has_function_type() {
-    let src = "agent Test\n\nfn f() -> int {\n    let g = x => x\n    let h: int = g\n    return 1\n}\n";
+    let src =
+        "agent Test\n\nfn f() -> int {\n    let g = x => x\n    let h: int = g\n    return 1\n}\n";
     let diags = errors(src);
     assert!(has(&diags, DiagKind::TypeMismatch), "got {:?}", diags);
 }
@@ -416,7 +419,8 @@ fn loop_variable_is_immutable() {
 }
 
 #[test]
-fn calling_a_non_function_is_error() {    let src =
+fn calling_a_non_function_is_error() {
+    let src =
         "agent Test\n\nfn f() -> int {\n    let x: int = 1\n    let y = x()\n    return x\n}\n";
     let diags = errors(src);
     assert!(has(&diags, DiagKind::NotCallable), "got {:?}", diags);
@@ -552,6 +556,25 @@ ui Main = Screen "Test" {
 }
 
 #[test]
+fn nominal_ui_values_are_rejected_instead_of_silently_dropped() {
+    let src = r#"agent Test
+struct User { name: string }
+ui Main = Screen "Test" {
+    @user: User = User(name: "Ada")
+    Text "hello"
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("not supported in UI")),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
 fn ui_binding_and_component_props_are_validated() {
     let src = r#"agent Test
 component Card {
@@ -564,7 +587,9 @@ ui Main = Screen "Test" {
 }
 "#;
     let diagnostics = errors(src);
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.kind == DiagKind::InvalidUi));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.kind == DiagKind::InvalidUi));
 }
 
 #[test]
@@ -580,4 +605,621 @@ fn pair(a: int, b: int) -> int { return a + b }
 fn f() -> int { return pair(b: 2, a: 1) }
 "#;
     assert_eq!(errors(src), Vec::new());
+}
+
+#[test]
+fn struct_and_enum_types_flow_through_declarations_aliases_and_members() {
+    let src = r#"agent Test
+
+struct User {
+    name: string
+    age: int
+    role: Role
+}
+
+enum Role {
+    Admin
+    Suspended(string)
+}
+
+type MaybeUser = User?
+type Users = [User]
+
+fn make(role: Role) -> User {
+    return User(name: "Ada", age: 42, role: role)
+}
+
+fn inspect(user: User, users: [User], maybe: User?) -> string {
+    let created: User = User(name: "Ada", age: 42, role: Role.Admin)
+    let optional: MaybeUser = created
+    let all: Users = [created]
+    let first: User = users[0]
+    let role: Role = Role.Admin
+    let suspended: Role = Role.Suspended("x")
+    let name: string = created.name
+    let current_role: Role = created.role
+    return name
+}
+"#;
+    assert_eq!(errors(src), Vec::new());
+}
+
+#[test]
+fn unknown_named_types_are_errors() {
+    let src = r#"agent Test
+fn passthrough(value: Missing) -> Missing {
+    return value
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(has(&diagnostics, DiagKind::TypeMismatch), "got {:?}", diagnostics);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("unknown named type \"Missing\"")),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(diagnostics.iter().all(|diagnostic| diagnostic.span.start.offset > 0));
+}
+
+#[test]
+fn duplicate_type_names_are_errors() {
+    let src = r#"agent Test
+struct Status {
+    code: int
+}
+enum Status {
+    Ready
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        has(&diagnostics, DiagKind::DuplicateDeclaration),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("duplicate type name")),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn duplicate_struct_fields_are_errors() {
+    let src = r#"agent Test
+struct User {
+    name: string
+    name: string
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        has(&diagnostics, DiagKind::DuplicateDeclaration),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("duplicate field")),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn duplicate_enum_variants_are_errors() {
+    let src = r#"agent Test
+enum Role {
+    Admin
+    Admin
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        has(&diagnostics, DiagKind::DuplicateDeclaration),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("duplicate variant")),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn function_and_type_name_collisions_are_errors() {
+    let src = r#"agent Test
+struct User {
+    name: string
+}
+fn User() -> int {
+    return 1
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        has(&diagnostics, DiagKind::DuplicateDeclaration),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("collides with function")),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn nominal_struct_rejects_structurally_equal_objects() {
+    let src = r#"agent Test
+struct User {
+    name: string
+}
+fn make() -> User {
+    return { name: "Ada" }
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        has(&diagnostics, DiagKind::TypeMismatch),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("expected User")),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn struct_constructor_validates_named_fields() {
+    let src = r#"agent Test
+struct User {
+    name: string
+    age: int
+}
+fn make() {
+    let first = User(name: "Ada", name: "Lin", age: "old", extra: true)
+    let second = User("Ada")
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        has(&diagnostics, DiagKind::TypeMismatch),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("provided more than once")),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("unknown field")),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("requires named arguments")),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("missing field")),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn enum_expression_forms_are_checked() {
+    let src = r#"agent Test
+enum Role {
+    Admin
+    Suspended(string)
+}
+fn make() {
+    let missing = Role.Missing
+    let extra = Role.Admin(1)
+    let bare_payload = Role.Suspended
+    let wrong_payload = Role.Suspended(1)
+    let unit = Role.Admin
+    let payload = Role.Suspended("x")
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("has no variant")),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("does not take a payload")),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("requires a payload")),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        has(&diagnostics, DiagKind::TypeMismatch),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn struct_member_access_is_typed() {
+    let src = r#"agent Test
+struct User {
+    name: string
+    age: int
+}
+fn inspect(user: User) -> string {
+    let missing = user.missing
+    let wrong: string = user.age
+    return user.name
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("has no field")),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        has(&diagnostics, DiagKind::TypeMismatch),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn enum_match_patterns_bind_and_type_payloads() {
+    let src = r#"agent Test
+enum Role {
+    Admin
+    Suspended(string)
+}
+fn describe(role: Role) -> string {
+    return match role {
+        Role.Admin -> "admin"
+        Role.Suspended(reason) -> reason
+    }
+}
+"#;
+    assert_eq!(errors(src), Vec::new());
+}
+
+#[test]
+fn enum_payload_binding_uses_the_declared_type() {
+    let src = r#"agent Test
+enum Role {
+    Suspended(string)
+}
+fn invalid(role: Role) -> int {
+    return match role {
+        Role.Suspended(reason) -> reason
+    }
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        has(&diagnostics, DiagKind::TypeMismatch),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("expected int, got string")),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn enum_match_pattern_shape_and_payload_types_are_checked() {
+    let src = r#"agent Test
+enum Role {
+    Admin
+    Suspended(string)
+}
+fn describe(role: Role) -> int {
+    return match role {
+        Role.Admin(reason) -> 1
+        Role.Missing -> 2
+        Role.Suspended -> 3
+        Role.Suspended(reason) -> reason
+    }
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("has no payload")),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("has no variant")),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("requires a payload pattern")),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        has(&diagnostics, DiagKind::TypeMismatch),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn enum_match_pattern_type_must_match_scrutinee() {
+    let src = r#"agent Test
+struct User {
+    name: string
+}
+enum Role {
+    Admin
+}
+fn invalid(user: User) -> int {
+    return match user {
+        Role.Admin -> 1
+    }
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        has(&diagnostics, DiagKind::TypeMismatch),
+        "got {:?}",
+        diagnostics
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("cannot match")),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn struct_match_patterns_bind_declared_fields() {
+    let src = r#"agent Test
+struct User {
+    name: string
+    age: int
+}
+fn describe(user: User) -> string {
+    return match user {
+        User { name: name, age: age } -> name + str(age)
+    }
+}
+"#;
+    assert_eq!(errors(src), Vec::new());
+}
+
+#[test]
+fn invalid_struct_match_patterns_are_reported() {
+    let src = r#"agent Test
+struct User {
+    name: string
+}
+fn describe(user: User) -> int {
+    return match user {
+        User { missing: value } -> 1
+    }
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(has(&diagnostics, DiagKind::InvalidOperand), "got {:?}", diagnostics);
+}
+
+#[test]
+fn legacy_match_bindings_remain_typed() {
+    let src = r#"agent Test
+fn literal(value: int) -> int {
+    return match value {
+        1 -> 1
+        other -> other
+        _ -> 0
+    }
+}
+fn optional(value: int?) -> int {
+    return match value {
+        some(inner) -> inner
+        none -> 0
+    }
+}
+"#;
+    assert_eq!(diags(src), Vec::new());
+}
+
+#[test]
+fn public_type_paths_resolve_to_scoped_identity() {
+    let src = r#"agent Test
+import "types.aec" as types
+pub struct User {
+    name: string
+}
+fn make() -> types.User {
+    return types.User(name: "Ada")
+}
+"#;
+    let mut program = aec_parser::parse(src).expect("source should parse");
+    program.item_modules[1] = Some("types".to_string());
+    program.imports.push(ResolvedImport {
+        alias: Some("types".to_string()),
+        path: "types.aec".to_string(),
+        exports: vec!["User".to_string()],
+    });
+    assert_eq!(check_program(&program), Vec::new());
+}
+
+#[test]
+fn private_type_paths_are_rejected() {
+    let src = r#"agent Test
+import "types.aec" as types
+struct User {
+    name: string
+}
+fn make() -> types.User {
+    return types.User(name: "Ada")
+}
+"#;
+    let mut program = aec_parser::parse(src).expect("source should parse");
+    program.item_modules[1] = Some("types".to_string());
+    program.imports.push(ResolvedImport {
+        alias: Some("types".to_string()),
+        path: "types.aec".to_string(),
+        exports: Vec::new(),
+    });
+    let diagnostics = check_program(&program)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.is_error())
+        .collect::<Vec<_>>();
+    assert!(!diagnostics.is_empty(), "expected private type diagnostics");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.message.contains("is private to its module")),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn nested_optional_array_and_result_types_are_checked() {
+    let src = r#"agent Test
+fn make(value: [int?]) -> Result([int?], string?) {
+    return ok(value)
+}
+fn wrap(value: Result(int?, string)) -> Result([Result(int?, string)], Result(string, [int?])) {
+    return ok([value])
+}
+"#;
+    assert_eq!(errors(src), Vec::new());
+}
+
+#[test]
+fn nested_optional_result_mismatches_are_reported() {
+    let src = r#"agent Test
+fn make(value: [int?]) -> Result([string?], string) {
+    return ok(value)
+}
+"#;
+    assert!(has(&errors(src), DiagKind::TypeMismatch));
+}
+
+#[test]
+fn result_branches_are_joined_without_losing_their_types() {
+    let src = r#"agent Test
+fn choose(flag: bool) -> Result(int, string) {
+    let result = match flag {
+        true -> ok(1)
+        false -> err("x")
+    }
+    let invalid: Result(string, int) = result
+    return result
+}
+"#;
+    assert!(has(&errors(src), DiagKind::TypeMismatch));
+}
+
+#[test]
+fn optional_branches_are_joined_without_losing_their_types() {
+    let src = r#"agent Test
+fn choose(flag: bool) -> int {
+    let value = match flag {
+        true -> 1
+        false -> none
+    }
+    let invalid: int = value
+    return value
+}
+"#;
+    assert!(has(&errors(src), DiagKind::TypeMismatch));
+}
+
+#[test]
+fn enum_match_must_cover_every_variant() {
+    let src = r#"agent Test
+enum Role {
+    Admin
+    Member
+}
+fn describe(role: Role) -> int {
+    return match role {
+        Role.Admin -> 1
+    }
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("non-exhaustive match")),
+        "got {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn optional_match_must_cover_some_and_none() {
+    let src = r#"agent Test
+fn read(value: int?) -> int {
+    return match value {
+        some(inner) -> inner
+    }
+}
+"#;
+    let diagnostics = errors(src);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("non-exhaustive match")),
+        "got {:?}",
+        diagnostics
+    );
 }

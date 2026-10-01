@@ -3,15 +3,16 @@ use crate::Rule;
 use aec_ast::{
     AgentHeader, Argument, ArrayExpr, AssignOp, AssignStmt, AwaitExpr, BinaryExpr, BinaryOp, Block,
     CapabilitiesBlock,
-    CallExpr, ComponentDecl, ComponentProp, ComponentUse, ElseBranch, Expr, FilesystemRule,
-    ForStmt, FunctionDecl, Identifier, IfStmt, ImportStmt, IndexExpr, InterpPart, LambdaExpr, LValue,
-    LValueStep, LetStmt,
+    CallExpr, ComponentDecl, ComponentProp, ComponentUse, ElseBranch, EnumDecl, EnumVariantDecl,
+    EnumVariantPattern, Expr, FilesystemRule, ForStmt, FunctionDecl, Identifier, IfStmt, ImportStmt,
+    IndexExpr, InterpPart, LambdaExpr, LValue, LValueStep, LetStmt,
     LimitsBlock, LimitsEntry, Literal, LiteralExpr, MatchArm, MatchBody, MatchExpr, MemberExpr,
     ModelDecl, ModelField, ModelProperty, NetworkRule, ObjectExpr, ObjectField, Parameter,
     ParenExpr, ParseError, Pattern, PermissionsBlock, PermissionsEntry, Position, Program,
     RetryBlock, RetryField, ReturnStmt, SecretValue, SecretsBlock, SecretsEntry, Span,
-    Statement as AstStatement, Style, StyleValue, SystemRule, ThemeDecl, ThemeEntry, ThemeGroup,
-    TopLevelItem, TryExpr, TypeAliasDecl, TypeExpr, UnaryExpr, UnaryOp, WhileStmt,
+    Statement as AstStatement, StructDecl, StructField, StructPattern, StructPatternField, Style,
+    StyleValue, SystemRule, ThemeDecl, ThemeEntry, ThemeGroup, TopLevelItem, TryExpr, TypeAliasDecl,
+    TypeExpr, UnaryExpr, UnaryOp, WhileStmt,
 };
 use pest::iterators::Pair;
 
@@ -52,6 +53,12 @@ pub fn build_program(pair: Pair<Rule>) -> Result<Program, ParseError> {
             }
             Rule::type_alias => {
                 items.push(TopLevelItem::TypeAlias(build_type_alias(item_pair)?));
+            }
+            Rule::struct_decl => {
+                items.push(TopLevelItem::Struct(build_struct_decl(item_pair)?));
+            }
+            Rule::enum_decl => {
+                items.push(TopLevelItem::Enum(build_enum_decl(item_pair)?));
             }
             Rule::import_stmt => {
                 items.push(TopLevelItem::Import(build_import_stmt(item_pair)?));
@@ -119,7 +126,11 @@ fn build_import_stmt(pair: Pair<Rule>) -> Result<ImportStmt, ParseError> {
     let alias = inner
         .next()
         .map(|alias_pair| {
-            let id_pair = alias_pair.into_inner().next().unwrap();
+            let alias_span = pair_span(&alias_pair);
+            let id_pair = alias_pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| build_error(alias_span, "import alias needs a name"))?;
             build_identifier(id_pair)
         })
         .transpose()?;
@@ -431,8 +442,12 @@ fn build_literal(pair: Pair<Rule>) -> Result<Literal, ParseError> {
         Rule::none_literal => Ok(Literal::None),
         Rule::duration_literal => {
             let mut inner = pair.into_inner();
-            let value_pair = inner.next().unwrap();
-            let unit_pair = inner.next().unwrap();
+            let value_pair = inner
+                .next()
+                .ok_or_else(|| build_error(span, "duration needs a value"))?;
+            let unit_pair = inner
+                .next()
+                .ok_or_else(|| build_error(span, "duration needs a unit"))?;
             let value = value_pair
                 .as_str()
                 .parse::<u64>()
@@ -449,8 +464,12 @@ fn build_literal(pair: Pair<Rule>) -> Result<Literal, ParseError> {
         }
         Rule::byte_size_literal => {
             let mut inner = pair.into_inner();
-            let value_pair = inner.next().unwrap();
-            let unit_pair = inner.next().unwrap();
+            let value_pair = inner
+                .next()
+                .ok_or_else(|| build_error(span, "byte size needs a value"))?;
+            let unit_pair = inner
+                .next()
+                .ok_or_else(|| build_error(span, "byte size needs a unit"))?;
             let value = value_pair
                 .as_str()
                 .parse::<u64>()
@@ -556,7 +575,10 @@ pub fn build_expr(pair: Pair<Rule>) -> Result<Expr, ParseError> {
     let span = pair_span(&pair);
     match pair.as_rule() {
         Rule::expr => {
-            let inner = pair.into_inner().next().unwrap();
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| build_error(span, "expression is empty"))?;
             build_expr(inner)
         }
         Rule::logical_or_expr => build_binary_chain(pair, &[("or", BinaryOp::Or)]),
@@ -637,19 +659,27 @@ fn build_postfix(pair: Pair<Rule>) -> Result<Expr, ParseError> {
                             args,
                             span,
                         }));
-                    }
-                    Rule::member_op => {
-                        let id_pair = op.into_inner().next().unwrap();
-                        let prop = build_identifier(id_pair)?;
+                     }
+                     Rule::member_op => {
+                         let op_span = pair_span(&op);
+                         let id_pair = op
+                             .into_inner()
+                             .next()
+                             .ok_or_else(|| build_error(op_span, "member access needs a name"))?;
+                         let prop = build_identifier(id_pair)?;
                         current = Expr::Member(Box::new(MemberExpr {
                             object: current,
                             property: prop,
                             span,
                         }));
-                    }
-                    Rule::index_op => {
-                        let idx_pair = op.into_inner().next().unwrap();
-                        let idx = build_expr(idx_pair)?;
+                     }
+                     Rule::index_op => {
+                         let op_span = pair_span(&op);
+                         let idx_pair = op
+                             .into_inner()
+                             .next()
+                             .ok_or_else(|| build_error(op_span, "index needs an expression"))?;
+                         let idx = build_expr(idx_pair)?;
                         current = Expr::Index(Box::new(IndexExpr {
                             object: current,
                             index: idx,
@@ -703,9 +733,12 @@ fn build_argument(pair: Pair<Rule>) -> Result<Argument, ParseError> {
 fn build_primary(pair: Pair<Rule>) -> Result<Expr, ParseError> {
     let span = pair_span(&pair);
     match pair.as_rule() {
-        Rule::paren_expr => {
-            let inner = pair.into_inner().next().unwrap();
-            let inner_expr = build_expr(inner)?;
+         Rule::paren_expr => {
+             let inner = pair
+                 .into_inner()
+                 .next()
+                 .ok_or_else(|| build_error(span, "parenthesized expression is empty"))?;
+             let inner_expr = build_expr(inner)?;
             Ok(Expr::Paren(Box::new(ParenExpr {
                 inner: inner_expr,
                 span,
@@ -721,18 +754,28 @@ fn build_primary(pair: Pair<Rule>) -> Result<Expr, ParseError> {
         Rule::object_expr => {
             let mut fields = Vec::new();
             for f in pair.into_inner() {
-                if f.as_rule() == Rule::object_field {
-                    let mut fi = f.into_inner();
-                    let key = build_identifier(fi.next().unwrap())?;
-                    let value = build_expr(fi.next().unwrap())?;
-                    fields.push(ObjectField { key, value, span });
+                 if f.as_rule() == Rule::object_field {
+                     let field_span = pair_span(&f);
+                     let mut fi = f.into_inner();
+                     let key_pair = fi
+                         .next()
+                         .ok_or_else(|| build_error(field_span, "object field needs a name"))?;
+                     let value_pair = fi
+                         .next()
+                         .ok_or_else(|| build_error(field_span, "object field needs a value"))?;
+                     let key = build_identifier(key_pair)?;
+                     let value = build_expr(value_pair)?;
+                     fields.push(ObjectField { key, value, span });
                 }
             }
             Ok(Expr::Object(Box::new(ObjectExpr { fields, span })))
         }
-        Rule::await_expr => {
-            let inner = pair.into_inner().next().unwrap();
-            let inner_expr = build_expr(inner)?;
+         Rule::await_expr => {
+             let inner = pair
+                 .into_inner()
+                 .next()
+                 .ok_or_else(|| build_error(span, "await needs an expression"))?;
+             let inner_expr = build_expr(inner)?;
             Ok(Expr::Await(Box::new(AwaitExpr {
                 inner: inner_expr,
                 span,
@@ -874,18 +917,99 @@ fn build_match_arm(pair: Pair<Rule>) -> Result<MatchArm, ParseError> {
     })
 }
 
+fn build_struct_pattern(pair: Pair<Rule>) -> Result<Pattern, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+    let path_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "struct pattern needs a path"))?;
+    let mut path = Vec::new();
+    for segment in path_pair.into_inner() {
+        if segment.as_rule() == Rule::identifier {
+            path.push(build_identifier(segment)?);
+        }
+    }
+    let mut fields = Vec::new();
+    for field_pair in inner {
+        if field_pair.as_rule() == Rule::struct_pattern_field {
+            fields.push(build_struct_pattern_field(field_pair)?);
+        }
+    }
+    Ok(Pattern::Struct(StructPattern {
+        path,
+        fields,
+        span,
+    }))
+}
+
+fn build_struct_pattern_field(pair: Pair<Rule>) -> Result<StructPatternField, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+    let name = build_identifier(
+        inner
+            .next()
+            .ok_or_else(|| build_error(span, "struct pattern field needs a name"))?,
+    )?;
+    let pattern_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "struct pattern field needs a pattern"))?;
+    Ok(StructPatternField {
+        name,
+        pattern: Box::new(build_pattern(pattern_pair)?),
+        span,
+    })
+}
+
+fn build_enum_variant_pattern(pair: Pair<Rule>) -> Result<Pattern, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+    let path_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "enum variant pattern needs a path"))?;
+    let mut path = Vec::new();
+    for segment in path_pair.into_inner() {
+        if segment.as_rule() == Rule::identifier {
+            path.push(build_identifier(segment)?);
+        }
+    }
+    let payload = match inner.next() {
+        Some(payload_pair) => {
+            let pattern_pair = payload_pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| build_error(span, "enum payload pattern is empty"))?;
+            Some(Box::new(build_pattern(pattern_pair)?))
+        }
+        None => None,
+    };
+    Ok(Pattern::EnumVariant(EnumVariantPattern {
+        path,
+        payload,
+        span,
+    }))
+}
+
 fn build_pattern(pair: Pair<Rule>) -> Result<Pattern, ParseError> {
     let span = pair_span(&pair);
     match pair.as_rule() {
+        Rule::struct_pattern => build_struct_pattern(pair),
+        Rule::enum_variant_pattern => build_enum_variant_pattern(pair),
         Rule::wildcard_pattern => Ok(Pattern::Wildcard(span)),
         Rule::none_pattern => Ok(Pattern::None(span)),
-        Rule::some_pattern => {
-            let id = build_identifier(pair.into_inner().next().unwrap())?;
-            Ok(Pattern::Some(id))
-        }
-        Rule::literal_pattern => {
-            let lit_pair = pair.into_inner().next().unwrap();
-            let lit = build_literal(lit_pair)?;
+         Rule::some_pattern => {
+             let id_pair = pair
+                 .into_inner()
+                 .next()
+                 .ok_or_else(|| build_error(span, "some pattern needs a name"))?;
+             let id = build_identifier(id_pair)?;
+             Ok(Pattern::Some(id))
+         }
+         Rule::literal_pattern => {
+             let lit_pair = pair
+                 .into_inner()
+                 .next()
+                 .ok_or_else(|| build_error(span, "literal pattern is empty"))?;
+             let lit = build_literal(lit_pair)?;
             Ok(Pattern::Literal(lit))
         }
         Rule::identifier => {
@@ -930,6 +1054,82 @@ fn build_type_alias(pair: Pair<Rule>) -> Result<TypeAliasDecl, ParseError> {
     })
 }
 
+fn build_struct_decl(pair: Pair<Rule>) -> Result<StructDecl, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+    let (is_public, name_pair) = take_visibility(&mut inner);
+    let name_pair = name_pair.ok_or_else(|| build_error(span, "struct needs a name"))?;
+    let name = build_identifier(name_pair)?;
+    let mut fields = Vec::new();
+    for field_pair in inner {
+        if field_pair.as_rule() == Rule::struct_field {
+            fields.push(build_struct_field(field_pair)?);
+        }
+    }
+    Ok(StructDecl {
+        is_public,
+        name,
+        fields,
+        span,
+    })
+}
+
+fn build_struct_field(pair: Pair<Rule>) -> Result<StructField, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+    let name = build_identifier(
+        inner
+            .next()
+            .ok_or_else(|| build_error(span, "struct field needs a name"))?,
+    )?;
+    let ty_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "struct field needs a type"))?;
+    let ty = build_full_type(ty_pair)?;
+    Ok(StructField { name, ty, span })
+}
+
+fn build_enum_decl(pair: Pair<Rule>) -> Result<EnumDecl, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+    let (is_public, name_pair) = take_visibility(&mut inner);
+    let name_pair = name_pair.ok_or_else(|| build_error(span, "enum needs a name"))?;
+    let name = build_identifier(name_pair)?;
+    let mut variants = Vec::new();
+    for variant_pair in inner {
+        if variant_pair.as_rule() == Rule::enum_variant {
+            variants.push(build_enum_variant(variant_pair)?);
+        }
+    }
+    Ok(EnumDecl {
+        is_public,
+        name,
+        variants,
+        span,
+    })
+}
+
+fn build_enum_variant(pair: Pair<Rule>) -> Result<EnumVariantDecl, ParseError> {
+    let span = pair_span(&pair);
+    let mut inner = pair.into_inner();
+    let name = build_identifier(
+        inner
+            .next()
+            .ok_or_else(|| build_error(span, "enum variant needs a name"))?,
+    )?;
+    let payload = match inner.next() {
+        Some(payload_pair) => {
+            let ty_pair = payload_pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| build_error(span, "enum payload needs a type"))?;
+            Some(build_full_type(ty_pair)?)
+        }
+        None => None,
+    };
+    Ok(EnumVariantDecl { name, payload, span })
+}
+
 fn build_function_decl(pair: Pair<Rule>) -> Result<FunctionDecl, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
@@ -949,7 +1149,11 @@ fn build_function_decl(pair: Pair<Rule>) -> Result<FunctionDecl, ParseError> {
                 }
             }
             Rule::return_type => {
-                let full = p.into_inner().next().unwrap();
+                let return_span = pair_span(&p);
+                let full = p
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| build_error(return_span, "return type is empty"))?;
                 return_type = Some(build_full_type(full)?);
             }
             Rule::block => {
@@ -974,8 +1178,13 @@ fn build_function_decl(pair: Pair<Rule>) -> Result<FunctionDecl, ParseError> {
 fn build_parameter(pair: Pair<Rule>) -> Result<Parameter, ParseError> {
     let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-    let name = build_identifier(inner.next().unwrap())?;
-    let ty_pair = inner.next().unwrap();
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "parameter needs a name"))?;
+    let name = build_identifier(name_pair)?;
+    let ty_pair = inner
+        .next()
+        .ok_or_else(|| build_error(span, "parameter needs a type"))?;
     let ty = build_full_type(ty_pair)?;
     let default = inner.next().map(build_expr).transpose()?;
     Ok(Parameter {
@@ -987,10 +1196,12 @@ fn build_parameter(pair: Pair<Rule>) -> Result<Parameter, ParseError> {
 }
 
 fn build_full_type(pair: Pair<Rule>) -> Result<TypeExpr, ParseError> {
+    let span = pair_span(&pair);
     let mut inner = pair.into_inner();
-    let base = inner.next().unwrap();
+    let base = inner
+        .next()
+        .ok_or_else(|| build_error(span, "type is empty"))?;
     let ty = build_base_type(base)?;
-    // A trailing `optional_marker` makes the type optional: `int?` → Optional(int)
     if inner.next().is_some() {
         return Ok(TypeExpr::Optional(Box::new(ty)));
     }
@@ -1016,22 +1227,40 @@ fn build_base_type(pair: Pair<Rule>) -> Result<TypeExpr, ParseError> {
             Ok(ty)
         }
         Rule::named_type => {
-            let id = build_identifier(pair.into_inner().next().unwrap())?;
-            Ok(TypeExpr::Named(id))
+            let fallback = pair.as_str().to_string();
+            let name = pair
+                .into_inner()
+                .next()
+                .map(|name_pair| Identifier::new(name_pair.as_str(), pair_span(&name_pair)))
+                .unwrap_or_else(|| Identifier::new(fallback, span));
+            Ok(TypeExpr::Named(name))
         }
         Rule::array_type => {
-            let inner = pair.into_inner().next().unwrap();
-            let inner_ty = build_base_type(inner)?;
+            let mut inner = pair.into_inner();
+            let inner = inner
+                .next()
+                .ok_or_else(|| build_error(span, "array type is empty"))?;
+            let inner_ty = build_full_type(inner)?;
             Ok(TypeExpr::Array(Box::new(inner_ty)))
         }
         Rule::result_type => {
             let mut inner = pair.into_inner();
-            let ok_ty = build_base_type(inner.next().unwrap())?;
-            let err_ty = build_base_type(inner.next().unwrap())?;
+            let ok_pair = inner
+                .next()
+                .ok_or_else(|| build_error(span, "Result needs an ok type"))?;
+            let err_pair = inner
+                .next()
+                .ok_or_else(|| build_error(span, "Result needs an error type"))?;
+            let ok_ty = build_full_type(ok_pair)?;
+            let err_ty = build_full_type(err_pair)?;
             Ok(TypeExpr::Result(Box::new(ok_ty), Box::new(err_ty)))
         }
+        Rule::full_type => build_full_type(pair),
         Rule::base_type => {
-            let inner = pair.into_inner().next().unwrap();
+            let mut inner = pair.into_inner();
+            let inner = inner
+                .next()
+                .ok_or_else(|| build_error(span, "type is empty"))?;
             build_base_type(inner)
         }
         rule => Err(build_error(span, format!("unsupported type: {:?}", rule))),
@@ -1061,11 +1290,14 @@ fn build_statement(pair: Pair<Rule>) -> Result<AstStatement, ParseError> {
             let value = inner.next().map(build_expr).transpose()?;
             Ok(AstStatement::Return(ReturnStmt { value, span }))
         }
-        Rule::expr_stmt => {
-            let inner = pair.into_inner().next().unwrap();
-            let expr = build_expr(inner)?;
-            Ok(AstStatement::Expr(expr))
-        }
+         Rule::expr_stmt => {
+             let inner = pair
+                 .into_inner()
+                 .next()
+                 .ok_or_else(|| build_error(span, "expression statement is empty"))?;
+             let expr = build_expr(inner)?;
+             Ok(AstStatement::Expr(expr))
+         }
         rule => Err(build_error(
             span,
             format!("unsupported statement: {:?}", rule),
@@ -1077,10 +1309,13 @@ fn build_let_stmt(pair: Pair<Rule>, mutable: bool) -> Result<AstStatement, Parse
     let span = pair_span(&pair);
     let keyword = if mutable { "var" } else { "let" };
 
-    let mut inner = pair.into_inner();
-    let name = build_identifier(inner.next().unwrap())?;
+     let mut inner = pair.into_inner();
+     let name_pair = inner
+         .next()
+         .ok_or_else(|| build_error(span, format!("{} needs a name", keyword)))?;
+     let name = build_identifier(name_pair)?;
 
-    let mut ty = None;
+     let mut ty = None;
     let mut next = inner
         .next()
         .ok_or_else(|| build_error(span, format!("{} needs a value", keyword)))?;
@@ -1139,21 +1374,34 @@ fn build_assign_stmt(pair: Pair<Rule>) -> Result<AssignStmt, ParseError> {
 
 fn build_lvalue(pair: Pair<Rule>) -> Result<LValue, ParseError> {
     let span = pair_span(&pair);
-    let mut inner = pair.into_inner();
+     let mut inner = pair.into_inner();
 
-    let base = build_identifier(inner.next().unwrap())?;
+     let base_pair = inner
+         .next()
+         .ok_or_else(|| build_error(span, "assignment target is empty"))?;
+     let base = build_identifier(base_pair)?;
 
-    let mut path = Vec::new();
+     let mut path = Vec::new();
     for step in inner {
         match step.as_rule() {
-            Rule::member_op => {
-                let id = build_identifier(step.into_inner().next().unwrap())?;
-                path.push(LValueStep::Member(id));
-            }
-            Rule::index_op => {
-                let idx = build_expr(step.into_inner().next().unwrap())?;
-                path.push(LValueStep::Index(idx));
-            }
+             Rule::member_op => {
+                 let step_span = pair_span(&step);
+                 let id_pair = step
+                     .into_inner()
+                     .next()
+                     .ok_or_else(|| build_error(step_span, "member target needs a name"))?;
+                 let id = build_identifier(id_pair)?;
+                 path.push(LValueStep::Member(id));
+             }
+             Rule::index_op => {
+                 let step_span = pair_span(&step);
+                 let index_pair = step
+                     .into_inner()
+                     .next()
+                     .ok_or_else(|| build_error(step_span, "index target needs an expression"))?;
+                 let idx = build_expr(index_pair)?;
+                 path.push(LValueStep::Index(idx));
+             }
             _ => {}
         }
     }

@@ -53,6 +53,39 @@ fn normalize(value: UserId) -> UserId {
 }
 ```
 
+Nominal `struct` and `enum` declarations are available for application data. Structs use explicit named-argument constructors, while enum variants may be unit values or carry one typed payload. Object literals remain structural and are not implicitly converted to structs.
+
+```aec
+struct User {
+    name: string
+    age: int
+}
+
+enum Role {
+    Admin
+    Suspended(string)
+}
+
+fn make() -> User {
+    return User(name: "Ada", age: 42)
+}
+
+fn label(role: Role) -> string {
+    return match role {
+        Role.Admin -> "admin"
+        Role.Suspended(reason) -> reason
+    }
+}
+
+fn name_of(user: User) -> string {
+    return match user {
+        User { name: name } -> name
+    }
+}
+```
+
+Struct fields are accessed with `user.name`; struct and enum patterns bind fields or payloads. Equality is nominal for structs and enums, so structurally identical values of different named types are not equal. Public structs and enums are available through an import alias as `types.User` and `types.Role.Admin`; private types remain module-local. UI state currently accepts the existing UI value types, while nominal values are intended for CLI/runtime data flows. See `examples/nominal.aec`.
+
 See `examples/result.aec` and `examples/lambda.aec`.
 
 ## UI
@@ -90,4 +123,4 @@ limits {
 }
 ```
 
-Without a `permissions` block, built-ins retain their unrestricted behavior. With a block, undeclared network, file, model-request, and system capabilities are denied by the interpreter. `shell.run`, environment access, and persistent memory are denied, and HTTP/model redirects are not followed in this mode. This is an in-process guard, not isolation for untrusted native code. See `examples/sandbox.aec`.
+Without a `permissions` block, built-ins retain their unrestricted behavior. With a block, undeclared network, file, model-request, and system capabilities are denied by the interpreter. `shell.run`, environment access, and persistent memory are denied, and HTTP/model redirects are not followed in this mode. This is an in-process guard, not isolation for untrusted native code. On Linux, `scripts/sandbox-linux.sh` adds a rootless `bubblewrap` process boundary with a read-only workspace, private temporary directories, and an isolated network namespace; it is an additional gate, not a replacement for the language policy. macOS and Windows require their native platform-specific isolation policy. See `examples/sandbox.aec`.

@@ -93,8 +93,8 @@ impl Loader {
         is_root: bool,
         module_scope: Option<&str>,
     ) -> Result<(aec_ast::AgentHeader, aec_ast::Span, Vec<TopLevelItem>)> {
-        let canonical = fs::canonicalize(path)
-            .with_context(|| format!("cannot load {}", path.display()))?;
+        let canonical =
+            fs::canonicalize(path).with_context(|| format!("cannot load {}", path.display()))?;
         let source = fs::read_to_string(&canonical)
             .with_context(|| format!("cannot read {}", canonical.display()))?;
         let program = aec_parser::parse(&source).map_err(|error| {
@@ -150,7 +150,8 @@ impl Loader {
                         let child_scope_ref = child_scope.as_deref().or(module_scope);
                         let child_item_start = self.item_modules.len();
                         let child_origin_start = self.origins.len();
-                        let (_, _, imported_items) = self.load(&imported, false, child_scope_ref)?;
+                        let (_, _, imported_items) =
+                            self.load(&imported, false, child_scope_ref)?;
                         let child_item_end = self.item_modules.len();
                         let child_origin_end = self.origins.len();
                         let raw_modules = self.item_modules[child_item_start..child_item_end]
@@ -162,18 +163,18 @@ impl Loader {
                             ImportedSnapshot {
                                 items: imported_items.clone(),
                                 item_modules: raw_modules,
-                                origins: self.origins[child_origin_start..child_origin_end].to_vec(),
+                                origins: self.origins[child_origin_start..child_origin_end]
+                                    .to_vec(),
                             },
                         );
                         let exports = exported_names(&imported_items);
-                        self.exports_by_path.insert(imported.clone(), exports.clone());
+                        self.exports_by_path
+                            .insert(imported.clone(), exports.clone());
                         if let Some(name) = alias.as_ref() {
                             self.seen_aliases.insert((imported.clone(), name.clone()));
                         } else {
-                            self.seen_unaliased.insert((
-                                imported.clone(),
-                                module_scope.map(str::to_string),
-                            ));
+                            self.seen_unaliased
+                                .insert((imported.clone(), module_scope.map(str::to_string)));
                         }
                         self.imports.push(ResolvedImport {
                             alias: alias.clone(),
@@ -201,7 +202,11 @@ impl Loader {
                                         .zip(snapshot.origins.iter())
                                     {
                                         let scoped = add_outer_scope(module, Some(&prefix));
-                                        self.register_declaration(item, scoped.as_deref(), &imported)?;
+                                        self.register_declaration(
+                                            item,
+                                            scoped.as_deref(),
+                                            &imported,
+                                        )?;
                                         self.item_modules.push(scoped);
                                         self.origins.push(*origin);
                                     }
@@ -258,7 +263,9 @@ fn strip_outer_scope(module: &Option<String>, outer: Option<&str>) -> Option<Str
     if module == outer {
         None
     } else {
-        module.strip_prefix(&format!("{outer}.")).map(str::to_string)
+        module
+            .strip_prefix(&format!("{outer}."))
+            .map(str::to_string)
     }
 }
 
@@ -277,6 +284,8 @@ fn declaration_identity(item: &TopLevelItem) -> Option<(u8, String)> {
         TopLevelItem::Function(declaration) => Some((0, declaration.name.name.clone())),
         TopLevelItem::Model(declaration) => Some((1, declaration.name.name.clone())),
         TopLevelItem::TypeAlias(declaration) => Some((5, declaration.name.name.clone())),
+        TopLevelItem::Struct(declaration) => Some((6, declaration.name.name.clone())),
+        TopLevelItem::Enum(declaration) => Some((7, declaration.name.name.clone())),
         TopLevelItem::Component(declaration) => Some((2, declaration.name.name.clone())),
         TopLevelItem::Theme(declaration) => Some((3, declaration.name.name.clone())),
         TopLevelItem::Ui(declaration) => Some((4, declaration.name.name.clone())),
@@ -292,6 +301,8 @@ fn declaration_kind(kind: u8) -> &'static str {
         3 => "theme",
         4 => "UI",
         5 => "type alias",
+        6 => "struct",
+        7 => "enum",
         _ => "declaration",
     }
 }
@@ -307,6 +318,12 @@ fn exported_names(items: &[TopLevelItem]) -> Vec<String> {
                 Some(declaration.name.name.clone())
             }
             TopLevelItem::TypeAlias(declaration) if declaration.is_public => {
+                Some(declaration.name.name.clone())
+            }
+            TopLevelItem::Struct(declaration) if declaration.is_public => {
+                Some(declaration.name.name.clone())
+            }
+            TopLevelItem::Enum(declaration) if declaration.is_public => {
                 Some(declaration.name.name.clone())
             }
             TopLevelItem::Component(declaration) if declaration.is_public => {

@@ -4,6 +4,7 @@ use crate::model::ModelDecl;
 use crate::permissions::{LimitsBlock, PermissionsBlock};
 use crate::span::Span;
 use crate::theme::ThemeDecl;
+use crate::type_decl::{EnumDecl, StructDecl};
 use crate::ui::{ComponentDecl, UiDecl};
 
 #[derive(Debug, Clone)]
@@ -50,6 +51,8 @@ pub enum TopLevelItem {
     Limits(LimitsBlock),
     Model(ModelDecl),
     TypeAlias(TypeAliasDecl),
+    Struct(StructDecl),
+    Enum(EnumDecl),
     Import(ImportStmt),
     Function(FunctionDecl),
     Component(ComponentDecl),

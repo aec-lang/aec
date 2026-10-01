@@ -77,7 +77,7 @@ fn restricted_http_does_not_follow_redirects() {
 
     let mut interpreter = Interpreter::new();
     interpreter.permissions = Some(Permissions {
-        network: Some(vec!["127.0.0.1".into()]),
+        network: Some(vec![format!("http://{address}")]),
         ..Default::default()
     });
     let result = call(&mut interpreter, "http.get", vec![Value::String(format!("http://{address}/start"))]);
@@ -93,7 +93,7 @@ fn restricted_http_does_not_follow_redirects() {
 fn extract_host_ignores_scheme_port_and_case() {
     assert_eq!(extract_host("https://Example.COM/x"), Some("example.com".into()));
     assert_eq!(extract_host("http://api.openai.com:8443/v1"), Some("api.openai.com".into()));
-    assert_eq!(extract_host("https://user:pw@api.telegram.org/bot"), Some("api.telegram.org".into()));
+    assert_eq!(extract_host("https://user:pw@api.telegram.org/bot"), None);
     assert_eq!(extract_host("api.telegram.org"), Some("api.telegram.org".into()));
     assert_eq!(extract_host("http://[::1]:8080/x"), Some("::1".into()));
     assert_eq!(extract_host(""), None);
@@ -106,15 +106,14 @@ fn extract_host_ignores_scheme_port_and_case() {
 #[test]
 fn network_allows_listed_host_and_denies_others() {
     let perms = Permissions {
-        network: Some(vec!["example.com".into()]),
+        network: Some(vec!["https://example.com".into()]),
         ..Default::default()
     };
 
-    // allow
     assert!(perms.check_network("https://example.com/api").is_ok());
-    assert!(perms.check_network("http://EXAMPLE.com:8080/api").is_ok());
-
-    // deny
+    assert!(perms.check_network("https://EXAMPLE.com:443/api").is_ok());
+    assert!(perms.check_network("http://example.com/api").is_err());
+    assert!(perms.check_network("https://example.com:8443/api").is_err());
     let err = perms
         .check_network("https://evil.com/steal")
         .expect_err("should be denied");

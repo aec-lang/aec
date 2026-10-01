@@ -1,6 +1,7 @@
 //! Standard Library — AEC built-in functions
 
 use crate::errors::RuntimeError;
+use crate::permissions::{build_http_client, read_limited_response, Limits};
 use crate::value::Value;
 use aec_ast::Span;
 use std::collections::HashMap;
@@ -81,7 +82,7 @@ pub fn call_builtin(
     name: &str,
     args: &[Value],
     span: Span,
-    limits: &crate::permissions::Limits,
+    limits: &Limits,
     restricted: bool,
 ) -> Result<Option<Value>, RuntimeError> {
     validate_builtin_args(name, args, span)?;
@@ -248,23 +249,21 @@ pub fn call_builtin(
                     span,
                 }),
             };
-            let client = reqwest::blocking::Client::builder()
-                .timeout(limits.http_timeout())
-                .redirect(if restricted { reqwest::redirect::Policy::none() } else { reqwest::redirect::Policy::default() })
-                .build()
-                .map_err(|e| RuntimeError::Generic {
-                    message: format!("failed to build client: {}", e),
-                    span,
-                })?;
-            let response = client.get(&url).header("User-Agent", "AEC/0.1").send().map_err(|e| RuntimeError::Generic {
+            let client = build_http_client(limits, restricted).map_err(|e| RuntimeError::Generic {
+                message: format!("failed to build client: {}", e),
+                span,
+            })?;
+            let mut response = client.get(&url).header("User-Agent", "AEC/0.1").send().map_err(|e| RuntimeError::Generic {
                 message: format!("HTTP GET failed: {}", e),
                 span,
             })?;
             let status = response.status().as_u16() as i64;
-            let text = response.text().map_err(|e| RuntimeError::Generic {
-                message: format!("failed to read response: {}", e),
+            let text = read_limited_response(
+                &mut response,
+                "HTTP GET",
+                limits.max_response_bytes(),
                 span,
-            })?;
+            )?;
             let mut obj = HashMap::new();
             obj.insert("status".to_string(), Value::Int(status));
             obj.insert("text".to_string(), Value::String(text));
@@ -289,15 +288,11 @@ pub fn call_builtin(
                     span,
                 }),
             };
-            let client = reqwest::blocking::Client::builder()
-                .timeout(limits.http_timeout())
-                .redirect(if restricted { reqwest::redirect::Policy::none() } else { reqwest::redirect::Policy::default() })
-                .build()
-                .map_err(|e| RuntimeError::Generic {
-                    message: format!("failed to build client: {}", e),
-                    span,
-                })?;
-            let response = client
+            let client = build_http_client(limits, restricted).map_err(|e| RuntimeError::Generic {
+                message: format!("failed to build client: {}", e),
+                span,
+            })?;
+            let mut response = client
                 .post(&url)
                 .header("Content-Type", "application/json")
                 .body(body)
@@ -307,10 +302,12 @@ pub fn call_builtin(
                     span,
                 })?;
             let status = response.status().as_u16() as i64;
-            let text = response.text().map_err(|e| RuntimeError::Generic {
-                message: format!("failed to read response: {}", e),
+            let text = read_limited_response(
+                &mut response,
+                "HTTP POST",
+                limits.max_response_bytes(),
                 span,
-            })?;
+            )?;
             let mut obj = HashMap::new();
             obj.insert("status".to_string(), Value::Int(status));
             obj.insert("text".to_string(), Value::String(text));
@@ -457,6 +454,29 @@ fn value_to_json(value: &Value) -> serde_json::Value {
             for (k, v) in obj {
                 map.insert(k.clone(), value_to_json(v));
             }
+            serde_json::Value::Object(map)
+        }
+        Value::Struct { fields, .. } => {
+            let mut map = serde_json::Map::new();
+            for (k, v) in fields {
+                map.insert(k.clone(), value_to_json(v));
+            }
+            serde_json::Value::Object(map)
+        }
+        Value::Enum { type_id, variant, values } => {
+            let mut map = serde_json::Map::new();
+            map.insert(
+                "type".to_string(),
+                serde_json::Value::String(type_id.replace("::", ".")),
+            );
+            map.insert(
+                "variant".to_string(),
+                serde_json::Value::String(variant.clone()),
+            );
+            map.insert(
+                "values".to_string(),
+                serde_json::Value::Array(values.iter().map(value_to_json).collect()),
+            );
             serde_json::Value::Object(map)
         }
         Value::Function(_) | Value::Closure(_) => serde_json::Value::Null,

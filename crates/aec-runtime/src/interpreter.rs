@@ -6,8 +6,8 @@ use crate::memory::Memory;
 use crate::permissions::{Limits, Permissions};
 use crate::value::{Closure, Env, Environment, Function, Value};
 use aec_ast::{
-    AssignOp, BinaryOp, Block, ElseBranch, Expr, ForStmt, FunctionDecl, ModelDecl,
-    IfStmt, LValue, LValueStep, MatchBody, Pattern, Program, Statement, UnaryOp,
+    AssignOp, BinaryOp, Block, ElseBranch, EnumDecl, Expr, ForStmt, FunctionDecl, IfStmt, LValue,
+    LValueStep, MatchBody, ModelDecl, Pattern, Program, Statement, StructDecl, TypeExpr, UnaryOp,
     WhileStmt,
 };
 use std::collections::{HashMap, HashSet};
@@ -23,6 +23,13 @@ pub struct Interpreter {
     module_env_ids: HashMap<usize, String>,
     models: HashMap<String, ModelDecl>,
     module_models: HashMap<String, ModelDecl>,
+    structs: HashMap<String, StructDecl>,
+    enums: HashMap<String, EnumDecl>,
+    type_aliases: HashMap<String, TypeExpr>,
+    type_alias_scopes: HashMap<String, Option<String>>,
+    public_type_aliases: HashMap<String, String>,
+    public_structs: HashMap<String, String>,
+    public_enums: HashMap<String, String>,
     module_secrets: HashMap<String, HashMap<String, String>>,
     secrets: HashMap<String, String>,
 }
@@ -39,6 +46,13 @@ impl Interpreter {
             module_env_ids: HashMap::new(),
             models: HashMap::new(),
             module_models: HashMap::new(),
+            structs: HashMap::new(),
+            enums: HashMap::new(),
+            type_aliases: HashMap::new(),
+            type_alias_scopes: HashMap::new(),
+            public_type_aliases: HashMap::new(),
+            public_structs: HashMap::new(),
+            public_enums: HashMap::new(),
             module_secrets: HashMap::new(),
             secrets: HashMap::new(),
         }
@@ -53,9 +67,20 @@ impl Interpreter {
         self.module_env_ids.clear();
         self.models.clear();
         self.module_models.clear();
+        self.structs.clear();
+        self.enums.clear();
+        self.type_aliases.clear();
+        self.type_alias_scopes.clear();
+        self.public_type_aliases.clear();
+        self.public_structs.clear();
+        self.public_enums.clear();
         self.module_secrets.clear();
         self.secrets.clear();
 
+        let restricted = program
+            .items
+            .iter()
+            .any(|item| matches!(item, aec_ast::TopLevelItem::Permissions(_)));
         let mut scopes: Vec<String> = program
             .item_modules
             .iter()
@@ -97,6 +122,15 @@ impl Interpreter {
                         self.models.insert(model.name.name.clone(), model.clone());
                     }
                 }
+                aec_ast::TopLevelItem::TypeAlias(declaration) => {
+                    self.register_type_alias(declaration, module.as_deref());
+                }
+                aec_ast::TopLevelItem::Struct(declaration) => {
+                    self.register_struct(declaration, module.as_deref());
+                }
+                aec_ast::TopLevelItem::Enum(declaration) => {
+                    self.register_enum(declaration, module.as_deref());
+                }
                 aec_ast::TopLevelItem::Secrets(secrets) => {
                     let values = if let Some(scope) = module.as_deref() {
                         self.module_secrets
@@ -108,6 +142,15 @@ impl Interpreter {
                     for entry in &secrets.entries {
                         let value = match &entry.value {
                             aec_ast::SecretValue::String(value) => value.clone(),
+                            aec_ast::SecretValue::Env(name) if restricted => {
+                                return Err(crate::permissions::denied(
+                                    format!(
+                                        "implicit environment access to '{}' is disabled when permissions are declared",
+                                        name
+                                    ),
+                                    entry.span,
+                                ));
+                            }
                             aec_ast::SecretValue::Env(name) => {
                                 std::env::var(name).unwrap_or_default()
                             }
@@ -125,6 +168,509 @@ impl Interpreter {
             }
         }
         Ok(())
+    }
+
+    fn scoped_type_key(module: Option<&str>, name: &str) -> String {
+        module
+            .map(|module| format!("{}::{}", module, name))
+            .unwrap_or_else(|| name.to_string())
+    }
+
+    fn register_type_alias(&mut self, declaration: &aec_ast::TypeAliasDecl, module: Option<&str>) {
+        let key = Self::scoped_type_key(module, &declaration.name.name);
+        self.type_aliases
+            .insert(key.clone(), declaration.target.clone());
+        self.type_alias_scopes.insert(key.clone(), module.map(str::to_string));
+        if declaration.is_public {
+            let public_name = module
+                .map(|module| format!("{}.{}", module, declaration.name.name))
+                .unwrap_or_else(|| declaration.name.name.clone());
+            self.public_type_aliases.insert(public_name, key);
+        }
+    }
+
+    fn resolve_type_alias_path(
+        &self,
+        path: &[String],
+        env: Option<&Env>,
+    ) -> Option<(String, TypeExpr, Option<String>)> {
+        if path.is_empty() {
+            return None;
+        }
+        let key = if path.len() == 1 {
+            let name = &path[0];
+            env.and_then(|env| self.module_for_env(env))
+                .and_then(|module| {
+                    let key = Self::scoped_type_key(Some(module), name);
+                    self.type_aliases
+                        .get(&key)
+                        .map(|target| (key.clone(), target.clone()))
+                })
+                .or_else(|| {
+                    self.public_type_aliases.get(name).and_then(|key| {
+                        self.type_aliases
+                            .get(key)
+                            .map(|target| (key.clone(), target.clone()))
+                    })
+                })
+                .or_else(|| {
+                    self.type_aliases
+                        .get(name)
+                        .map(|target| (name.clone(), target.clone()))
+                })
+        } else {
+            self.public_type_aliases
+                .get(&path.join("."))
+                .and_then(|key| {
+                    self.type_aliases
+                        .get(key)
+                        .map(|target| (key.clone(), target.clone()))
+                })
+        }?;
+        let scope = self.type_alias_scopes.get(&key.0).cloned().flatten();
+        Some((key.0, key.1, scope))
+    }
+
+    fn resolve_runtime_type_expr(
+        &self,
+        expr: &TypeExpr,
+        env: &Env,
+        scope: Option<&str>,
+        visiting: &mut HashSet<String>,
+    ) -> TypeExpr {
+        match expr {
+            TypeExpr::Named(identifier) => {
+                let path = identifier
+                    .name
+                    .split('.')
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                let Some((key, target, target_scope)) = self.resolve_type_alias_path(&path, Some(env))
+                else {
+                    return expr.clone();
+                };
+                if !visiting.insert(key.clone()) {
+                    return expr.clone();
+                }
+                let resolved = self.resolve_runtime_type_expr(
+                    &target,
+                    env,
+                    target_scope.as_deref().or(scope),
+                    visiting,
+                );
+                visiting.remove(&key);
+                resolved
+            }
+            TypeExpr::Optional(inner) => TypeExpr::Optional(Box::new(
+                self.resolve_runtime_type_expr(inner, env, scope, visiting),
+            )),
+            TypeExpr::Array(inner) => TypeExpr::Array(Box::new(
+                self.resolve_runtime_type_expr(inner, env, scope, visiting),
+            )),
+            TypeExpr::Result(ok, error) => TypeExpr::Result(
+                Box::new(self.resolve_runtime_type_expr(ok, env, scope, visiting)),
+                Box::new(self.resolve_runtime_type_expr(error, env, scope, visiting)),
+            ),
+            _ => expr.clone(),
+        }
+    }
+
+    fn register_struct(&mut self, declaration: &StructDecl, module: Option<&str>) {
+        let key = Self::scoped_type_key(module, &declaration.name.name);
+        self.structs.insert(key.clone(), declaration.clone());
+        if declaration.is_public {
+            let public_name = module
+                .map(|module| format!("{}.{}", module, declaration.name.name))
+                .unwrap_or_else(|| declaration.name.name.clone());
+            self.public_structs.insert(public_name, key);
+        }
+    }
+
+    fn register_enum(&mut self, declaration: &EnumDecl, module: Option<&str>) {
+        let key = Self::scoped_type_key(module, &declaration.name.name);
+        self.enums.insert(key.clone(), declaration.clone());
+        if declaration.is_public {
+            let public_name = module
+                .map(|module| format!("{}.{}", module, declaration.name.name))
+                .unwrap_or_else(|| declaration.name.name.clone());
+            self.public_enums.insert(public_name, key);
+        }
+    }
+
+    fn resolve_struct_path(
+        &self,
+        path: &[String],
+        env: Option<&Env>,
+    ) -> Option<(String, StructDecl)> {
+        if path.is_empty() {
+            return None;
+        }
+        if path.len() == 1 {
+            let name = &path[0];
+            if let Some(module) = env.and_then(|env| self.module_for_env(env)) {
+                let key = Self::scoped_type_key(Some(module), name);
+                if let Some(declaration) = self.structs.get(&key) {
+                    return Some((key, declaration.clone()));
+                }
+            }
+            if let Some(key) = self.public_structs.get(name) {
+                if let Some(declaration) = self.structs.get(key) {
+                    return Some((key.clone(), declaration.clone()));
+                }
+            }
+            if let Some(declaration) = self.structs.get(name) {
+                return Some((name.clone(), declaration.clone()));
+            }
+            return None;
+        }
+
+        let public_name = path.join(".");
+        if let Some(key) = self.public_structs.get(&public_name) {
+            if let Some(declaration) = self.structs.get(key) {
+                return Some((key.clone(), declaration.clone()));
+            }
+        }
+        let module = path[..path.len() - 1].join(".");
+        if let Some(current) = env.and_then(|env| self.module_for_env(env)) {
+            if current == module {
+                let key = Self::scoped_type_key(Some(&module), path.last()?);
+                if let Some(declaration) = self.structs.get(&key) {
+                    return Some((key, declaration.clone()));
+                }
+            }
+        }
+        None
+    }
+
+    fn resolve_enum_path(
+        &self,
+        path: &[String],
+        env: Option<&Env>,
+    ) -> Option<(String, EnumDecl)> {
+        if path.is_empty() {
+            return None;
+        }
+        if path.len() == 1 {
+            let name = &path[0];
+            if let Some(module) = env.and_then(|env| self.module_for_env(env)) {
+                let key = Self::scoped_type_key(Some(module), name);
+                if let Some(declaration) = self.enums.get(&key) {
+                    return Some((key, declaration.clone()));
+                }
+            }
+            if let Some(key) = self.public_enums.get(name) {
+                if let Some(declaration) = self.enums.get(key) {
+                    return Some((key.clone(), declaration.clone()));
+                }
+            }
+            if let Some(declaration) = self.enums.get(name) {
+                return Some((name.clone(), declaration.clone()));
+            }
+            return None;
+        }
+
+        let public_name = path.join(".");
+        if let Some(key) = self.public_enums.get(&public_name) {
+            if let Some(declaration) = self.enums.get(key) {
+                return Some((key.clone(), declaration.clone()));
+            }
+        }
+        let module = path[..path.len() - 1].join(".");
+        if let Some(current) = env.and_then(|env| self.module_for_env(env)) {
+            if current == module {
+                let key = Self::scoped_type_key(Some(&module), path.last()?);
+                if let Some(declaration) = self.enums.get(&key) {
+                    return Some((key, declaration.clone()));
+                }
+            }
+        }
+        None
+    }
+
+    fn value_matches_type(&self, value: &Value, ty: &TypeExpr, env: &Env) -> bool {
+        let scope = self.module_for_env(env).map(str::to_string);
+        let resolved = self.resolve_runtime_type_expr(ty, env, scope.as_deref(), &mut HashSet::new());
+        match &resolved {
+            TypeExpr::String => matches!(value, Value::String(_)),
+            TypeExpr::Int => matches!(value, Value::Int(_) | Value::Float(_)),
+            TypeExpr::Float => matches!(value, Value::Int(_) | Value::Float(_)),
+            TypeExpr::Bool => matches!(value, Value::Bool(_)),
+            TypeExpr::Bytes | TypeExpr::Timestamp => matches!(value, Value::Int(_)),
+            TypeExpr::Unit => matches!(value, Value::None),
+            TypeExpr::Uuid => matches!(value, Value::String(_)),
+            TypeExpr::Function => matches!(value, Value::Function(_) | Value::Closure(_)),
+            TypeExpr::Optional(inner) => {
+                matches!(value, Value::None) || self.value_matches_type(value, inner, env)
+            }
+            TypeExpr::Array(inner) => match value {
+                Value::Array(values) => values.iter().all(|value| self.value_matches_type(value, inner, env)),
+                _ => false,
+            },
+            TypeExpr::Result(ok, error) => match value {
+                Value::Result(Ok(value)) => self.value_matches_type(value, ok, env),
+                Value::Result(Err(value)) => self.value_matches_type(value, error, env),
+                _ => false,
+            },
+            TypeExpr::Named(identifier) => {
+                let path = identifier
+                    .name
+                    .split('.')
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                if let Some((type_id, _)) = self.resolve_struct_path(&path, Some(env)) {
+                    return matches!(value, Value::Struct { type_id: value_id, .. } if value_id == &type_id);
+                }
+                if let Some((type_id, _)) = self.resolve_enum_path(&path, Some(env)) {
+                    return matches!(value, Value::Enum { type_id: value_id, .. } if value_id == &type_id);
+                }
+                true
+            }
+        }
+    }
+
+    fn type_expression_name(&self, ty: &TypeExpr, env: &Env) -> String {
+        let scope = self.module_for_env(env).map(str::to_string);
+        let resolved = self.resolve_runtime_type_expr(ty, env, scope.as_deref(), &mut HashSet::new());
+        match &resolved {
+            TypeExpr::Named(identifier) => {
+                let path = identifier
+                    .name
+                    .split('.')
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                if let Some((type_id, _)) = self.resolve_struct_path(&path, Some(env)) {
+                    type_id
+                } else if let Some((type_id, _)) = self.resolve_enum_path(&path, Some(env)) {
+                    type_id
+                } else {
+                    identifier.name.clone()
+                }
+            }
+            TypeExpr::String => "string".to_string(),
+            TypeExpr::Int => "int".to_string(),
+            TypeExpr::Float => "float".to_string(),
+            TypeExpr::Bool => "bool".to_string(),
+            TypeExpr::Bytes => "bytes".to_string(),
+            TypeExpr::Unit => "unit".to_string(),
+            TypeExpr::Uuid => "uuid".to_string(),
+            TypeExpr::Timestamp => "timestamp".to_string(),
+            TypeExpr::Function => "function".to_string(),
+            TypeExpr::Optional(inner) => format!("{}?", self.type_expression_name(inner, env)),
+            TypeExpr::Array(inner) => format!("[{}]", self.type_expression_name(inner, env)),
+            TypeExpr::Result(ok, error) => format!(
+                "Result({}, {})",
+                self.type_expression_name(ok, env),
+                self.type_expression_name(error, env)
+            ),
+        }
+    }
+
+    fn ensure_value_type(
+        &self,
+        value: &Value,
+        ty: &TypeExpr,
+        env: &Env,
+        context: &str,
+        span: aec_ast::Span,
+    ) -> Result<(), RuntimeError> {
+        if self.value_matches_type(value, ty, env) {
+            return Ok(());
+        }
+        Err(RuntimeError::TypeError {
+            message: format!(
+                "{} expects {}, got {}",
+                context,
+                self.type_expression_name(ty, env),
+                value_type_name(value)
+            ),
+            span,
+        })
+    }
+
+    fn construct_struct(
+        &mut self,
+        type_id: String,
+        declaration: &StructDecl,
+        args: &[(Option<String>, Value)],
+        env: &Env,
+        span: aec_ast::Span,
+    ) -> Result<Value, RuntimeError> {
+        let mut fields = HashMap::new();
+        for (name, value) in args {
+            let Some(name) = name else {
+                return Err(RuntimeError::TypeError {
+                    message: format!(
+                        "struct '{}' only accepts named arguments",
+                        display_type_id(&type_id)
+                    ),
+                    span,
+                });
+            };
+            let Some(field) = declaration.fields.iter().find(|field| field.name.name == *name) else {
+                return Err(RuntimeError::TypeError {
+                    message: format!(
+                        "unknown field '{}' for struct '{}'",
+                        name,
+                        display_type_id(&type_id)
+                    ),
+                    span,
+                });
+            };
+            if fields.contains_key(name) {
+                return Err(RuntimeError::TypeError {
+                    message: format!(
+                        "field '{}' was provided more than once for struct '{}'",
+                        name,
+                        display_type_id(&type_id)
+                    ),
+                    span,
+                });
+            }
+            let context = format!(
+                "field '{}' of struct '{}'",
+                name,
+                display_type_id(&type_id)
+            );
+            self.ensure_value_type(value, &field.ty, env, &context, span)?;
+            fields.insert(name.clone(), value.clone());
+        }
+        if fields.len() != declaration.fields.len() {
+            return Err(RuntimeError::WrongArgCount {
+                expected: declaration.fields.len(),
+                got: args.len(),
+                span,
+            });
+        }
+        Ok(Value::Struct { type_id, fields })
+    }
+
+    fn construct_enum_variant(
+        &mut self,
+        type_id: &str,
+        declaration: &EnumDecl,
+        variant_name: &str,
+        args: &[(Option<String>, Value)],
+        env: &Env,
+        span: aec_ast::Span,
+    ) -> Result<Value, RuntimeError> {
+        let Some(variant) = declaration
+            .variants
+            .iter()
+            .find(|variant| variant.name.name == variant_name)
+        else {
+            return Err(RuntimeError::TypeError {
+                message: format!(
+                    "unknown variant '{}' for enum '{}'",
+                    variant_name,
+                    display_type_id(type_id)
+                ),
+                span,
+            });
+        };
+        let display_name = format!("{}.{}", display_type_id(type_id), variant_name);
+        let payload = variant.payload.clone();
+        let Some(payload_type) = payload else {
+            if !args.is_empty() {
+                return Err(RuntimeError::WrongArgCount {
+                    expected: 0,
+                    got: args.len(),
+                    span,
+                });
+            }
+            return Ok(Value::Enum {
+                type_id: type_id.to_string(),
+                variant: variant_name.to_string(),
+                values: Vec::new(),
+            });
+        };
+        if args.len() != 1 {
+            return Err(RuntimeError::WrongArgCount {
+                expected: 1,
+                got: args.len(),
+                span,
+            });
+        }
+        let Some((name, value)) = args.first() else {
+            return Err(RuntimeError::WrongArgCount {
+                expected: 1,
+                got: 0,
+                span,
+            });
+        };
+        if name.is_some() {
+            return Err(RuntimeError::TypeError {
+                message: format!("enum variant '{}' only accepts a positional payload", display_name),
+                span,
+            });
+        }
+        let context = format!("payload of enum variant '{}'", display_name);
+        self.ensure_value_type(value, &payload_type, env, &context, span)?;
+        Ok(Value::Enum {
+            type_id: type_id.to_string(),
+            variant: variant_name.to_string(),
+            values: vec![value.clone()],
+        })
+    }
+
+    fn eval_struct_path(
+        &mut self,
+        path: &[String],
+        args: Option<&[(Option<String>, Value)]>,
+        env: &Env,
+        span: aec_ast::Span,
+    ) -> Result<Option<Value>, RuntimeError> {
+        let Some((type_id, declaration)) = self.resolve_struct_path(path, Some(env)) else {
+            return Ok(None);
+        };
+        let Some(args) = args else {
+            return Err(RuntimeError::TypeError {
+                message: format!(
+                    "struct '{}' must be called with named arguments",
+                    display_type_id(&type_id)
+                ),
+                span,
+            });
+        };
+        Ok(Some(self.construct_struct(type_id, &declaration, args, env, span)?))
+    }
+
+    fn eval_enum_path(
+        &mut self,
+        path: &[String],
+        args: Option<&[(Option<String>, Value)]>,
+        env: &Env,
+        span: aec_ast::Span,
+    ) -> Result<Option<Value>, RuntimeError> {
+        if path.len() < 2 {
+            return Ok(None);
+        }
+        for split in (1..path.len()).rev() {
+            let Some((type_id, declaration)) = self.resolve_enum_path(&path[..split], Some(env))
+            else {
+                continue;
+            };
+            if path.len() - split != 1 {
+                return Ok(None);
+            }
+            let variant_name = &path[split];
+            let empty_args: &[(Option<String>, Value)] = &[];
+            let args = args.unwrap_or(empty_args);
+            return Ok(Some(self.construct_enum_variant(
+                &type_id,
+                &declaration,
+                variant_name,
+                args,
+                env,
+                span,
+            )?));
+        }
+        Ok(None)
+    }
+
+    fn path_root_is_unbound(&self, path: &[String], env: &Env) -> bool {
+        path.first()
+            .map(|name| env.borrow().get(name).is_none())
+            .unwrap_or(false)
     }
 
     fn register_function_in_env(
@@ -557,10 +1103,11 @@ impl Interpreter {
                     return Err(RuntimeError::WrongArgCount { expected: 1, got: args.len(), span });
                 }
                 match &args[0] {
-                    Value::String(s) => Value::Int(s.len() as i64),
-                    Value::Array(a) => Value::Int(a.len() as i64),
-                    Value::Object(o) => Value::Int(o.len() as i64),
-                    v => return Err(RuntimeError::TypeError {
+                    Value::String(s) => Value::Int(s.chars().count() as i64),
+                     Value::Array(a) => Value::Int(a.len() as i64),
+                     Value::Object(o) => Value::Int(o.len() as i64),
+                     Value::Struct { fields, .. } => Value::Int(fields.len() as i64),
+                     v => return Err(RuntimeError::TypeError {
                         message: format!("len() doesn't work on {}", v.type_name()),
                         span,
                     }),
@@ -856,28 +1403,37 @@ impl Interpreter {
                 }),
             },
             "keys" => match &args[0] {
-                Value::Object(o) => {
-                    let keys: Vec<Value> = o.keys().map(|k| Value::String(k.clone())).collect();
-                    Value::Array(keys)
-                }
-                v => return Err(RuntimeError::TypeError {
+                 Value::Object(fields) => {
+                     let keys: Vec<Value> = fields.keys().map(|k| Value::String(k.clone())).collect();
+                     Value::Array(keys)
+                 }
+                 Value::Struct { fields, .. } => {
+                     let keys: Vec<Value> = fields.keys().map(|k| Value::String(k.clone())).collect();
+                     Value::Array(keys)
+                 }
+                 v => return Err(RuntimeError::TypeError {
                     message: format!("keys() needs object, got {}", v.type_name()),
                     span,
                 }),
             },
             "values" => match &args[0] {
-                Value::Object(o) => {
-                    let values: Vec<Value> = o.values().cloned().collect();
-                    Value::Array(values)
-                }
-                v => return Err(RuntimeError::TypeError {
+                 Value::Object(fields) => {
+                     let values: Vec<Value> = fields.values().cloned().collect();
+                     Value::Array(values)
+                 }
+                 Value::Struct { fields, .. } => {
+                     let values: Vec<Value> = fields.values().cloned().collect();
+                     Value::Array(values)
+                 }
+                 v => return Err(RuntimeError::TypeError {
                     message: format!("values() needs object, got {}", v.type_name()),
                     span,
                 }),
             },
-            "has" => match (&args[0], &args[1]) {
-                (Value::Object(o), Value::String(k)) => Value::Bool(o.contains_key(k)),
-                _ => return Err(RuntimeError::TypeError {
+             "has" => match (&args[0], &args[1]) {
+                 (Value::Object(fields), Value::String(k)) => Value::Bool(fields.contains_key(k)),
+                 (Value::Struct { fields, .. }, Value::String(k)) => Value::Bool(fields.contains_key(k)),
+                 _ => return Err(RuntimeError::TypeError {
                     message: "has() needs object and string".to_string(),
                     span,
                 }),
@@ -1149,7 +1705,11 @@ impl Interpreter {
         {
             let mut scope = captured.borrow_mut();
             scope.vars.extend(bindings);
-            scope.parent = Some(self.global.clone());
+            let parent = self
+                .module_for_env(env)
+                .and_then(|module| self.module_envs.get(module).cloned())
+                .unwrap_or_else(|| self.global.clone());
+            scope.parent = Some(parent);
         }
         captured
     }
@@ -1326,23 +1886,66 @@ impl Interpreter {
         };
 
         match step {
-            LValueStep::Member(id) => {
-                let Value::Object(object) = current else {
-                    return Err(RuntimeError::TypeError {
-                        message: format!("can't assign .{} on {}", id.name, current.type_name()),
+            LValueStep::Member(id) => match current {
+                Value::Object(object) => {
+                    if rest.is_empty() {
+                        object.insert(id.name.clone(), value);
+                        return Ok(());
+                    }
+                    let child = object.get_mut(&id.name).ok_or_else(|| RuntimeError::Generic {
+                        message: format!("no field '{}'", id.name),
                         span,
-                    });
-                };
-                if rest.is_empty() {
-                    object.insert(id.name.clone(), value);
-                    return Ok(());
+                    })?;
+                    self.assign_path(child, rest, env, span, value)
                 }
-                let child = object.get_mut(&id.name).ok_or_else(|| RuntimeError::Generic {
-                    message: format!("no field '{}'", id.name),
+                Value::Struct { type_id, fields } => {
+                    let type_id = type_id.clone();
+                    let Some(declaration) = self.structs.get(&type_id) else {
+                        return Err(RuntimeError::Generic {
+                            message: format!("unknown struct type '{}'", display_type_id(&type_id)),
+                            span,
+                        });
+                    };
+                    let Some(field) = declaration
+                        .fields
+                        .iter()
+                        .find(|field| field.name.name == id.name)
+                    else {
+                        return Err(RuntimeError::Generic {
+                            message: format!(
+                                "struct '{}' has no field '{}'",
+                                display_type_id(&type_id),
+                                id.name
+                            ),
+                            span,
+                        });
+                    };
+                    let field_type = field.ty.clone();
+                    if rest.is_empty() {
+                        let context = format!(
+                            "field '{}' of struct '{}'",
+                            id.name,
+                            display_type_id(&type_id)
+                        );
+                        self.ensure_value_type(&value, &field_type, &env, &context, span)?;
+                        fields.insert(id.name.clone(), value);
+                        return Ok(());
+                    }
+                    let child = fields.get_mut(&id.name).ok_or_else(|| RuntimeError::Generic {
+                        message: format!(
+                            "struct '{}' has no field '{}'",
+                            display_type_id(&type_id),
+                            id.name
+                        ),
+                        span,
+                    })?;
+                    self.assign_path(child, rest, env, span, value)
+                }
+                value => Err(RuntimeError::TypeError {
+                    message: format!("can't assign .{} on {}", id.name, value.type_name()),
                     span,
-                })?;
-                self.assign_path(child, rest, env, span, value)
-            }
+                }),
+            },
             LValueStep::Index(index_expr) => {
                 let index = self.eval_expr(index_expr, env.clone())?;
                 match (current, index) {
@@ -1396,15 +1999,25 @@ impl Interpreter {
         for step in path {
             current = match step {
                 LValueStep::Member(id) => match current {
-                    Value::Object(o) => o.get(&id.name).cloned().ok_or_else(|| {
+                    Value::Object(fields) => fields.get(&id.name).cloned().ok_or_else(|| {
                         RuntimeError::Generic {
                             message: format!("no field '{}'", id.name),
                             span,
                         }
                     })?,
-                    v => {
+                    Value::Struct { type_id, fields } => fields.get(&id.name).cloned().ok_or_else(|| {
+                        RuntimeError::Generic {
+                            message: format!(
+                                "struct '{}' has no field '{}'",
+                                display_type_id(&type_id),
+                                id.name
+                            ),
+                            span,
+                        }
+                    })?,
+                    value => {
                         return Err(RuntimeError::TypeError {
-                            message: format!("can't access .{} on {}", id.name, v.type_name()),
+                            message: format!("can't access .{} on {}", id.name, value.type_name()),
                             span,
                         })
                     }
@@ -1506,10 +2119,30 @@ impl Interpreter {
                     if let Some(value) = value {
                         return self.call_value(&value, &args, call.span);
                     }
+                    let path = vec![id.name.clone()];
+                    if let Some(value) = self.eval_struct_path(&path, Some(&args), &env, call.span)? {
+                        return Ok(value);
+                    }
                     return self.call_function_values(&id.name, &args, call.span);
                 }
 
                 if let Some(path) = Self::expression_path(&call.callee) {
+                    let segments = path
+                        .split('.')
+                        .map(str::to_string)
+                        .collect::<Vec<_>>();
+                    if self.path_root_is_unbound(&segments, &env) {
+                        if let Some(value) =
+                            self.eval_struct_path(&segments, Some(&args), &env, call.span)?
+                        {
+                            return Ok(value);
+                        }
+                        if let Some(value) =
+                            self.eval_enum_path(&segments, Some(&args), &env, call.span)?
+                        {
+                            return Ok(value);
+                        }
+                    }
                     if path == "secrets.get" {
                         return self.call_secrets_get(&args, call.span, Some(&env));
                     }
@@ -1526,6 +2159,24 @@ impl Interpreter {
 
                 if let Expr::Member(member) = &call.callee {
                     if let Expr::Identifier(namespace) = &member.object {
+                        let bound = {
+                            let environment = env.borrow();
+                            environment.get(&namespace.name)
+                        };
+                        if let Some(object) = bound {
+                            let value = match object {
+                                Value::Object(fields) => fields.get(&member.property.name).cloned(),
+                                Value::Struct { fields, .. } => fields.get(&member.property.name).cloned(),
+                                _ => None,
+                            };
+                            if let Some(value) = value {
+                                return self.call_value(&value, &args, call.span);
+                            }
+                            return Err(RuntimeError::Generic {
+                                message: format!("no callable field '{}'", member.property.name),
+                                span: call.span,
+                            });
+                        }
                         let name = format!("{}.{}", namespace.name, member.property.name);
                         let effective_name = self
                             .module_for_env(&env)
@@ -1535,10 +2186,18 @@ impl Interpreter {
                         return self.call_function_values(&effective_name, &args, call.span);
                     }
                     let object = self.eval_expr(&member.object, env.clone())?;
-                    if let Value::Object(fields) = object {
-                        if let Some(value) = fields.get(&member.property.name) {
-                            return self.call_value(value, &args, call.span);
+                    match object {
+                        Value::Object(fields) => {
+                            if let Some(value) = fields.get(&member.property.name) {
+                                return self.call_value(value, &args, call.span);
+                            }
                         }
+                        Value::Struct { fields, .. } => {
+                            if let Some(value) = fields.get(&member.property.name) {
+                                return self.call_value(value, &args, call.span);
+                            }
+                        }
+                        _ => {}
                     }
                     return Err(RuntimeError::Generic {
                         message: format!("no callable field '{}'", member.property.name),
@@ -1551,6 +2210,24 @@ impl Interpreter {
             }
             Expr::Member(m) => {
                 if let Some(path) = Self::expression_path(&Expr::Member(m.clone())) {
+                    let segments = path
+                        .split('.')
+                        .map(str::to_string)
+                        .collect::<Vec<_>>();
+                    if self.path_root_is_unbound(&segments, &env) {
+                        if let Some(value) = self.eval_enum_path(&segments, None, &env, m.span)? {
+                            return Ok(value);
+                        }
+                        if let Some((type_id, _)) = self.resolve_struct_path(&segments, Some(&env)) {
+                            return Err(RuntimeError::TypeError {
+                                message: format!(
+                                    "struct '{}' must be called with named arguments",
+                                    display_type_id(&type_id)
+                                ),
+                                span: m.span,
+                            });
+                        }
+                    }
                     if let Some((model_name, field_name)) = path.rsplit_once('.') {
                         if let Some((_, model)) = self.resolve_model(model_name, Some(&env)) {
                             let mut fields = HashMap::new();
@@ -1590,12 +2267,23 @@ impl Interpreter {
                 }
                 let obj = self.eval_expr(&m.object, env)?;
                 match obj {
-                    Value::Object(o) => o.get(&m.property.name).cloned().ok_or_else(|| {
+                    Value::Object(fields) => fields.get(&m.property.name).cloned().ok_or_else(|| {
                         RuntimeError::Generic {
                             message: format!("no field '{}'", m.property.name),
                             span: m.span,
                         }
                     }),
+                    Value::Struct { type_id, fields } => fields
+                        .get(&m.property.name)
+                        .cloned()
+                        .ok_or_else(|| RuntimeError::Generic {
+                            message: format!(
+                                "struct '{}' has no field '{}'",
+                                display_type_id(&type_id),
+                                m.property.name
+                            ),
+                            span: m.span,
+                        }),
                     v => Err(RuntimeError::TypeError {
                         message: format!("can't access .{} on {}", m.property.name, v.type_name()),
                         span: m.span,
@@ -1675,7 +2363,7 @@ impl Interpreter {
         let scrutinee = self.eval_expr(&m.scrutinee, env.clone())?;
 
         for arm in &m.arms {
-            if let Some(bindings) = self.pattern_bindings(&arm.pattern, &scrutinee)? {
+            if let Some(bindings) = self.pattern_bindings(&arm.pattern, &scrutinee, &env)? {
                 let arm_env = Environment::with_parent(env.clone());
                 for (name, value) in bindings {
                     arm_env.borrow_mut().set(name, value);
@@ -1695,6 +2383,7 @@ impl Interpreter {
         &mut self,
         pattern: &Pattern,
         value: &Value,
+        env: &Env,
     ) -> Result<Option<Vec<(String, Value)>>, RuntimeError> {
         match pattern {
             Pattern::Wildcard(_) => Ok(Some(Vec::new())),
@@ -1734,6 +2423,84 @@ impl Interpreter {
             },
             Pattern::Identifier(identifier) => {
                 Ok(Some(vec![(identifier.name.clone(), value.clone())]))
+            }
+            Pattern::EnumVariant(enum_pattern) => {
+                if enum_pattern.path.len() < 2 {
+                    return Ok(None);
+                }
+                let type_path = enum_pattern.path[..enum_pattern.path.len() - 1]
+                    .iter()
+                    .map(|identifier| identifier.name.clone())
+                    .collect::<Vec<_>>();
+                let Some(last) = enum_pattern.path.last() else {
+                    return Ok(None);
+                };
+                let variant_name = &last.name;
+                let Some((type_id, declaration)) = self.resolve_enum_path(&type_path, Some(env)) else {
+                    return Ok(None);
+                };
+                let Value::Enum {
+                    type_id: value_type_id,
+                    variant,
+                    values,
+                } = value
+                else {
+                    return Ok(None);
+                };
+                if value_type_id != &type_id || variant != variant_name {
+                    return Ok(None);
+                }
+                let Some(variant_decl) = declaration
+                    .variants
+                    .iter()
+                    .find(|variant_decl| variant_decl.name.name == *variant_name)
+                else {
+                    return Ok(None);
+                };
+                match (&enum_pattern.payload, variant_decl.payload.is_some()) {
+                    (None, false) if values.is_empty() => Ok(Some(Vec::new())),
+                    (None, false) | (None, true) | (Some(_), false) => Ok(None),
+                    (Some(payload), true) if values.len() == 1 => {
+                        self.pattern_bindings(payload, &values[0], env)
+                    }
+                    (Some(_), true) => Ok(None),
+                }
+            }
+            Pattern::Struct(pattern) => {
+                if pattern.path.is_empty() {
+                    return Ok(None);
+                }
+                let type_path = pattern
+                    .path
+                    .iter()
+                    .map(|identifier| identifier.name.clone())
+                    .collect::<Vec<_>>();
+                let Some((type_id, _)) = self.resolve_struct_path(&type_path, Some(env)) else {
+                    return Ok(None);
+                };
+                let Value::Struct {
+                    type_id: value_type_id,
+                    fields,
+                } = value
+                else {
+                    return Ok(None);
+                };
+                if value_type_id != &type_id {
+                    return Ok(None);
+                }
+                let mut bindings = Vec::new();
+                for field in &pattern.fields {
+                    let Some(field_value) = fields.get(&field.name.name) else {
+                        return Ok(None);
+                    };
+                    let Some(field_bindings) =
+                        self.pattern_bindings(&field.pattern, field_value, env)?
+                    else {
+                        return Ok(None);
+                    };
+                    bindings.extend(field_bindings);
+                }
+                Ok(Some(bindings))
             }
         }
     }
@@ -1984,9 +2751,24 @@ fn literal_value(literal: &aec_ast::Literal) -> Value {
     }
 }
 
+fn display_type_id(type_id: &str) -> String {
+    type_id.replace("::", ".")
+}
+
+fn value_type_name(value: &Value) -> String {
+    match value {
+        Value::Struct { type_id, .. } | Value::Enum { type_id, .. } => type_id.clone(),
+        other => other.type_name().to_string(),
+    }
+}
+
 fn interp_text(value: Value) -> String {
     match &value {
         Value::Object(fields) => match fields.get("text") {
+            Some(text) => interp_text(text.clone()),
+            None => value.to_string(),
+        },
+        Value::Struct { fields, .. } => match fields.get("text") {
             Some(text) => interp_text(text.clone()),
             None => value.to_string(),
         },
@@ -2003,6 +2785,56 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::String(x), Value::String(y)) => x == y,
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::None, Value::None) => true,
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(left, right)| values_equal(left, right))
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len()
+                && x.iter().all(|(key, left)| {
+                    y.get(key)
+                        .map(|right| values_equal(left, right))
+                        .unwrap_or(false)
+                })
+        }
+        (
+            Value::Struct {
+                type_id: left_type,
+                fields: left_fields,
+            },
+            Value::Struct {
+                type_id: right_type,
+                fields: right_fields,
+            },
+        ) => {
+            left_type == right_type
+                && left_fields.len() == right_fields.len()
+                && left_fields.iter().all(|(name, left)| {
+                    right_fields
+                        .get(name)
+                        .map(|right| values_equal(left, right))
+                        .unwrap_or(false)
+                })
+        }
+        (
+            Value::Enum {
+                type_id: left_type,
+                variant: left_variant,
+                values: left_values,
+            },
+            Value::Enum {
+                type_id: right_type,
+                variant: right_variant,
+                values: right_values,
+            },
+        ) => {
+            left_type == right_type
+                && left_variant == right_variant
+                && left_values.len() == right_values.len()
+                && left_values
+                    .iter()
+                    .zip(right_values)
+                    .all(|(left, right)| values_equal(left, right))
+        }
         _ => false,
     }
 }

@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Guide — AEC</title>
+<meta name="description" content="Guide for the AEC programming language." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+<link rel="stylesheet" href="/assets/site.css" />
+</head>
+<body>
+
+<header class="nav">
+  <a class="brand" href="/"><span class="logo">⚡</span><span>AEC</span></a>
+  <nav>
+    <a href="/guide.html">Guide</a>
+    <a href="/stdlib.html">Built-ins</a>
+    <a href="/components.html">Components</a>
+    <a href="/themes.html">Themes</a>
+    <a href="/apm.html">Packages</a>
+    <a href="/registry.html">Registry</a>
+    <a href="/roadmap.html">Roadmap</a>
+    <a class="cta" href="/guide.html#install">Install</a>
+  </nav>
+  <button class="burger" id="burger" aria-label="Menu">☰</button>
+</header>
+
+<main class="docs">
+  <aside class="side">
+    <div class="search">
+      <input id="q" type="search" placeholder="Search the docs…" autocomplete="off" />
+      <div class="results" id="results"></div>
+    </div>
+
+    <div class="side-group">
+      <h4>Start</h4>
+      <nav>
+        <a href="/index.html">Home</a>
+        <a href="/guide.html">Guide</a>
+        <a href="/language.html">Language</a>
+      </nav>
+    </div>
+
+    <div class="side-group">
+      <h4>Reference</h4>
+      <nav>
+        <a href="/stdlib.html">Built-ins</a>
+        <a href="/components.html">Components</a>
+        <a href="/themes.html">Themes</a>
+      </nav>
+    </div>
+
+    <div class="side-group">
+      <h4>Ecosystem</h4>
+      <nav>
+        <a href="/apm.html">Packages</a>
+        <a href="/registry.html">Registry</a>
+      </nav>
+    </div>
+
+    <div class="side-group">
+      <h4>Project</h4>
+      <nav>
+        <a href="/roadmap.html">Roadmap</a>
+        <a href="/release.html">Release</a>
+      </nav>
+    </div>
+  </aside>
+  <article class="prose">
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <ol>
+      <li><a href="#contents">Contents</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="#prebuilt-binaries-no-rust-needed">Prebuilt binaries (no Rust needed)</a></li>
+      <li><a href="#from-source">From source</a></li>
+      <li><a href="#try-it-in-30-seconds">Try it in 30 seconds</a></li>
+      <li><a href="#the-language">The language</a></li>
+      <li><a href="#native-ui">Native UI</a></li>
+      <li><a href="#permissions">Permissions</a></li>
+      <li><a href="#package-manager">Package manager</a></li>
+      <li><a href="#signed-registry">Signed registry</a></li>
+      <li><a href="#os-sandbox">OS sandbox</a></li>
+      <li><a href="#cli-reference">CLI reference</a></li>
+      <li><a href="#aec">`aec`</a></li>
+      <li><a href="#apm">`apm`</a></li>
+      <li><a href="#headless-visual-qa">Headless visual QA</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#development">Development</a></li>
+      <li><a href="#status">Status</a></li>
+      <li><a href="#documentation">Documentation</a></li>
+      <li><a href="#contributing">Contributing</a></li>
+      <li><a href="#license">License</a></li>
+    </ol>
+  </details>
+<h1 id="guide">Guide</h1>
+<p>&lt;div align=&quot;center&quot;&gt;</p>
+<h1 id="aec-agent-easy-creator">AEC — Agent Easy Creator</h1>
+<p><strong>A programming language for building AI agents, with a native UI in the same file.</strong></p>
+<p><a href="https://github.com/aec-lang/aec/workflows/AEC%20CI/badge.svg" target="_blank" rel="noopener">![CI</a>](https://github.com/aec-lang/aec/actions/workflows/ci.yml) <a href="https://img.shields.io/github/v/release/aec-lang/aec?label=release" target="_blank" rel="noopener">![Release</a>](https://github.com/aec-lang/aec/releases) <a href="https://img.shields.io/badge/rust-1.75%2B-orange" target="_blank" rel="noopener">![Rust</a>](https://www.rust-lang.org)</p>
+<p>&lt;/div&gt;</p>
+<hr />
+<p>AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one <code>.aec</code> file, type-checked before it runs, and rendered with a native egui window or a terminal UI.</p>
+<pre><code class="lang-aec">agent Greeting
+
+ui Main = Screen &quot;Greeting&quot; {
+    @name: string = &quot;&quot;
+    Column {
+        Input placeholder: &quot;Name&quot; bind value to name
+        Text &quot;Hello {name}&quot;
+    }
+}</code></pre>
+<pre><code class="lang-sh">aec run greeting.aec</code></pre>
+<hr />
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#install">Install</a> · <a href="#try-it-in-30-seconds">Try it in 30 seconds</a></li>
+<li><a href="#the-language">The language</a> · <a href="#native-ui">Native UI</a> · <a href="#permissions">Permissions</a></li>
+<li><a href="#package-manager">Package manager</a> · <a href="#os-sandbox">Sandbox</a> · <a href="#cli-reference">CLI reference</a></li>
+<li><a href="#architecture">Architecture</a> · <a href="#development">Development</a> · <a href="#status">Status</a></li>
+</ul>
+<hr />
+<h2 id="install">Install</h2>
+<h3 id="prebuilt-binaries-no-rust-needed">Prebuilt binaries (no Rust needed)</h3>
+<pre><code class="lang-sh">curl -fsSL https://raw.githubusercontent.com/aec-lang/aec/main/scripts/install-release.sh | bash</code></pre>
+<p>This downloads the release archive for your platform, verifies it against the published <code>SHA256SUMS</code>, and installs <code>aec</code> and <code>apm</code> into <code>$HOME/.local/bin</code>.</p>
+<p>&lt;details&gt; &lt;summary&gt;Manual download, or Windows&lt;/summary&gt;</p>
+<p>Grab the archive for your platform from the <a href="https://github.com/aec-lang/aec/releases" target="_blank" rel="noopener">releases page</a>, then verify it:</p>
+<pre><code class="lang-sh">sha256sum --check SHA256SUMS          # after extracting both files together</code></pre>
+<table><thead><tr>
+<th>Platform</th>
+<th>Archive</th>
+<th>Contains</th>
+</tr></thead><tbody>
+<tr>
+<td>macOS x86_64</td>
+<td><code>aec-macos-x86_64.tar.gz</code></td>
+<td><code>aec</code>, <code>apm</code></td>
+</tr>
+<tr>
+<td>Windows x86_64</td>
+<td><code>aec-windows-x86_64.zip</code></td>
+<td><code>aec.exe</code>, <code>apm.exe</code></td>
+</tr>
+</tbody></table>
+<p>Windows is not covered by the shell installer; download the <code>.zip</code> and extract it. &lt;/details&gt;</p>
+<h3 id="from-source">From source</h3>
+<p>Requires Rust 1.75 or newer. Linux builds of the native UI also need the GTK, XCB, and OpenSSL development packages.</p>
+<pre><code class="lang-sh">git clone https://github.com/aec-lang/aec.git
+cd aec
+PREFIX=&quot;$HOME/.local&quot; ./scripts/install.sh
+export PATH=&quot;$HOME/.local/bin:$PATH&quot;</code></pre>
+<p>Or with Cargo directly:</p>
+<pre><code class="lang-sh">cargo install --path crates/aec-cli --locked --bin aec --bin apm</code></pre>
+<p>&lt;details&gt; &lt;summary&gt;Debian/Ubuntu build dependencies&lt;/summary&gt;</p>
+<pre><code class="lang-sh">sudo apt-get install -y libclang-dev libgtk-3-dev libxcb-render0-dev \
+    libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev bubblewrap</code></pre>
+<p>&lt;/details&gt;</p>
+<hr />
+<h2 id="try-it-in-30-seconds">Try it in 30 seconds</h2>
+<pre><code class="lang-sh">aec check examples/language.aec      # parse + type check
+aec run   examples/language.aec --cli
+aec run   examples/chatbot.aec       # opens a native window
+aec run   examples/chatbot.aec --tui # same UI, drawn in the terminal</code></pre>
+<p><code>examples/</code> holds runnable programs: <code>language.aec</code>, <code>nominal.aec</code>, <code>result.aec</code>, <code>lambda.aec</code>, <code>chatbot.aec</code>, <code>theme.aec</code>, <code>memory.aec</code>, <code>sandbox.aec</code>, and a two-file <code>modules/</code> example.</p>
+<hr />
+<h2 id="the-language">The language</h2>
+<p>Every file starts with <code>agent Name</code>.</p>
+<pre><code class="lang-aec">agent Basics
+
+struct User {
+    name: string
+    age: int
+}
+
+enum Role {
+    Admin
+    Suspended(string)
+}
+
+fn describe(user: User) -&gt; string {
+    return match user {
+        User { name: name, age: age } -&gt; &quot;{name} ({age})&quot;
+    }
+}
+
+fn main() -&gt; int {
+    var count = 0
+    for item in [1, 2, 3] {
+        count += item
+    }
+    print(&quot;sum is {count}&quot;)
+    return 0
+}</code></pre>
+<table><thead><tr>
+<th>Feature</th>
+<th>Syntax</th>
+</tr></thead><tbody>
+<tr>
+<td>Types</td>
+<td><code>int</code> <code>float</code> <code>string</code> <code>bool</code> <code>bytes</code> <code>uuid</code> <code>timestamp</code> <code>unit</code> <code>[T]</code> <code>T?</code> <code>Result(T,E)</code> <code>function</code></td>
+</tr>
+<tr>
+<td>Nominal types</td>
+<td><code>struct</code> with named-argument constructors, <code>enum</code> with unit or one-payload variants</td>
+</tr>
+<tr>
+<td>Error handling</td>
+<td><code>ok(v)</code> / <code>err(v)</code>, <code>expr?</code> to propagate</td>
+</tr>
+<tr>
+<td>Closures</td>
+<td><code>x =&gt; x + 1</code> captures locals by snapshot</td>
+</tr>
+<tr>
+<td>Aliases</td>
+<td><code>type UserId = string</code></td>
+</tr>
+<tr>
+<td>Interpolation</td>
+<td><code>&quot;Hello {name}&quot;</code> — a brace group that is not a valid expression stays literal</td>
+</tr>
+<tr>
+<td>Control flow</td>
+<td><code>if</code>/<code>else</code>, <code>while</code>, <code>for ... in</code>, <code>match</code>, <code>return</code></td>
+</tr>
+<tr>
+<td>Logic</td>
+<td><code>not</code>, <code>and</code>, <code>or</code></td>
+</tr>
+<tr>
+<td>Modules</td>
+<td><code>import &quot;./math.aec&quot; as math</code>, then <code>math.double(21)</code>; <code>pub</code> controls export</td>
+</tr>
+</tbody></table>
+<p>Struct and enum equality is <strong>nominal</strong>: two structurally identical values of different named types are not equal. Pattern matching works on both.</p>
+<p>Full reference: <a href="docs/language.md">language guide</a> · <a href="docs/stdlib.md">built-ins</a></p>
+<hr />
+<h2 id="native-ui">Native UI</h2>
+<p>A <code>ui</code> declaration builds a real window. State is declared with <code>@name</code>, bound to widgets, and the tree is rebuilt against current state after every event.</p>
+<pre><code class="lang-aec">ui Main = Screen &quot;Messages&quot; {
+    @draft: string = &quot;&quot;
+    @messages: [object] = []
+
+    Column {
+        Messages list: messages
+        Input placeholder: &quot;Say something&quot; bind value to draft
+        Button &quot;Send&quot; on click -&gt; send()
+    }
+}</code></pre>
+<ul>
+<li><strong>Widgets:</strong> <code>Text</code> <code>Input</code> <code>Button</code> <code>Column</code> <code>Row</code> <code>Card</code> <code>Messages</code></li>
+<li><strong>Binding:</strong> <code>Input placeholder: &quot;…&quot; bind value to name</code></li>
+<li><strong>Events:</strong> <code>Button &quot;Send&quot; on click -&gt; send()</code> — event arguments are passed to the handler</li>
+<li><strong>Reactivity:</strong> <code>if</code> and <code>for</code> work inside the tree, including <code>range(3)</code>; the</li>
+</ul>
+<p>widget tree is rebuilt after input and events, so conditions and loops update</p>
+<ul>
+<li><strong>State:</strong> <code>push_to(&quot;messages&quot;, item)</code> updates the global array of the same name</li>
+<li><strong>Components:</strong> reusable <code>component</code> blocks with <code>prop</code> values and a <code>render</code> body;</li>
+</ul>
+<p>each instance gets identity-scoped local state</p>
+<ul>
+<li><strong>Themes:</strong> <code>theme Dark default { color { … } text { … } }</code>, accessed as</li>
+</ul>
+<p><code>theme.color.primary</code>, with <code>extends</code> for inheritance</p>
+<p>Themes and components from an aliased import use their qualified name (<code>library.Panel</code>, <code>theme.library.Dark.color.primary</code>).</p>
+<p>Right-to-left text is laid out correctly and the bundled Vazirmatn font covers Persian.</p>
+<p>Reference: <a href="docs/components.md">components</a> · <a href="docs/themes.md">themes</a></p>
+<hr />
+<h2 id="permissions">Permissions</h2>
+<p>Capabilities are default-deny once a <code>permissions</code> block is present.</p>
+<pre><code class="lang-aec">permissions {
+    network: [&quot;api.example.com&quot;]
+    filesystem {
+        read: [&quot;.&quot;]
+        write: [&quot;data&quot;]
+    }
+    system { metrics: true }
+}
+
+limits {
+    timeout: 5s
+}</code></pre>
+<p>With a block, undeclared network, filesystem, model, and system capabilities are denied; <code>shell.run</code>, environment access, and persistent memory are denied outright; HTTP and model requests do not follow redirects. Without a block, built-ins keep their unrestricted behavior.</p>
+<p>This is an <strong>in-process cooperative guard, not an OS sandbox.</strong> For untrusted input, combine it with a real host boundary — see below.</p>
+<p>Reference: <a href="docs/language.md#permissions">language guide § Permissions</a> · <a href="SECURITY.md">SECURITY.md</a></p>
+<hr />
+<h2 id="package-manager">Package manager</h2>
+<p><code>apm</code> is AEC's package manager. It has the commands you expect and a signed, immutable local registry.</p>
+<pre><code class="lang-sh">apm init my-agent                        # create apm.toml
+apm add helper ./packages/helper         # local path dependency
+apm install                              # resolve, write apm.lock
+apm list &amp;&amp; apm tree</code></pre>
+<h3 id="signed-registry">Signed registry</h3>
+<pre><code class="lang-sh">apm keygen --private-key keys/signing.pkcs8 --public-key keys/signing.pub
+apm registry-init ./registry
+apm publish --registry ./registry --private-key keys/signing.pkcs8 --package .
+apm verify --registry ./registry --name my-agent --version 0.1.0 \
+    --trust-key keys/signing.pub</code></pre>
+<p>Publication copies the payload into a staging directory, writes deterministic metadata binding every file's SHA-256, size, and the aggregate tree digest, and signs that metadata with a detached Ed25519 signature. Versions are immutable — an existing version is never replaced. Verification always requires an explicitly selected <code>--trust-key</code>; a public key embedded in registry metadata does not establish trust by itself.</p>
+<p><strong>Current boundary:</strong> the registry is a local directory. There is no HTTP registry client and no key rotation yet, and registry verification is not wired into runtime import resolution — <code>apm install</code> still records local paths.</p>
+<p>Reference: <a href="docs/apm.md">APM</a></p>
+<hr />
+<h2 id="os-sandbox">OS sandbox</h2>
+<p>The interpreter guard runs inside the process. These scripts add a real host boundary on top of it:</p>
+<table><thead><tr>
+<th>Platform</th>
+<th>Script</th>
+<th>Mechanism</th>
+<th>Verified</th>
+</tr></thead><tbody>
+<tr>
+<td>macOS</td>
+<td><code>scripts/sandbox-macos.sh</code></td>
+<td><code>sandbox-exec</code> profile, deny-by-default</td>
+<td>needs a macOS host</td>
+</tr>
+<tr>
+<td>Windows</td>
+<td><code>scripts/sandbox-windows.ps1</code></td>
+<td>emits a <code>.wsb</code> config for Windows Sandbox (Hyper-V VM, read-only repo mount)</td>
+<td>needs a Windows host</td>
+</tr>
+</tbody></table>
+<pre><code class="lang-sh">./scripts/sandbox-linux.sh aec run untrusted.aec --cli
+./scripts/sandbox-selftest.sh    # reports verified / untested / failed per platform</code></pre>
+<p>On Linux, a sandboxed run cannot read files outside the repository and cannot write into it — both were confirmed to fail closed. <code>sandbox-selftest.sh</code> deliberately reports <code>untested</code> for platforms it cannot run on rather than claiming coverage.</p>
+<p>Reference: <a href="SECURITY.md">SECURITY.md</a></p>
+<hr />
+<h2 id="cli-reference">CLI reference</h2>
+<h3 id="aec"><code>aec</code></h3>
+<table><thead><tr>
+<th>Command</th>
+<th>Description</th>
+</tr></thead><tbody>
+<tr>
+<td><code>aec ast &lt;file&gt;</code></td>
+<td>Print the parsed AST.</td>
+</tr>
+<tr>
+<td><code>aec run &lt;file&gt;</code></td>
+<td>Type check, then run. Opens a native window if a <code>ui</code> exists.</td>
+</tr>
+<tr>
+<td><code>aec run &lt;file&gt; --cli</code></td>
+<td>Force terminal mode, ignoring the UI.</td>
+</tr>
+<tr>
+<td><code>aec run &lt;file&gt; --tui</code></td>
+<td>Draw the UI in the terminal instead of a window.</td>
+</tr>
+<tr>
+<td><code>aec run &lt;file&gt; --entry &lt;fn&gt;</code></td>
+<td>Call a different entry function (default <code>main</code>).</td>
+</tr>
+<tr>
+<td><code>aec ui-snap &lt;file&gt;</code></td>
+<td>Render headlessly and write PNG snapshots (visual QA).</td>
+</tr>
+<tr>
+<td><code>aec ui-snap &lt;file&gt; --click Send --type draft=hello</code></td>
+<td>Drive the UI, then snapshot the result.</td>
+</tr>
+</tbody></table>
+<p><code>aec</code> also accepts <code>init</code>, <code>add</code>, <code>remove</code>, <code>install</code>, <code>list</code>, and <code>tree</code> as aliases of the <code>apm</code> commands.</p>
+<h3 id="apm"><code>apm</code></h3>
+<p><code>init</code> · <code>add</code> · <code>remove</code> · <code>install</code> · <code>list</code> · <code>tree</code> · <code>keygen</code> · <code>registry-init</code> · <code>publish</code> · <code>verify</code></p>
+<h3 id="headless-visual-qa">Headless visual QA</h3>
+<pre><code class="lang-sh">aec ui-snap examples/chatbot.aec --out snapshots/ --click Send --type draft=سلام</code></pre>
+<p>Writes PNG frames and reports the painted-pixel count and the interactable widgets, so UI regressions are detectable in CI without a display server.</p>
+<hr />
+<h2 id="architecture">Architecture</h2>
+<p>Six crates, no runtime dependencies beyond the standard library and a focused set of crates:</p>
+<table><thead><tr>
+<th>Crate</th>
+<th>Responsibility</th>
+</tr></thead><tbody>
+<tr>
+<td><code>aec-parser</code></td>
+<td><code>pest</code> grammar → AST, with spanned diagnostics</td>
+</tr>
+<tr>
+<td><code>aec-check</code></td>
+<td>Static checker: types, arity, named arguments, nominal identity</td>
+</tr>
+<tr>
+<td><code>aec-runtime</code></td>
+<td>Tree-walking interpreter, built-ins, permission guard, SQLite memory</td>
+</tr>
+<tr>
+<td><code>aec-ui</code></td>
+<td>egui/eframe native window, terminal renderer, headless snapshot harness</td>
+</tr>
+<tr>
+<td><code>aec-cli</code></td>
+<td>The <code>aec</code> and <code>apm</code> binaries, module loader, diagnostic renderer</td>
+</tr>
+</tbody></table>
+<p><code>aec run</code> will not execute a program that fails the type check — the gate is structural, not advisory.</p>
+<p>Built-ins cover collections, text, files, HTTP/JSON, environment, time, math, regex, crypto, UUID, OpenAI-compatible model calls, and SQLite-backed conversation memory.</p>
+<hr />
+<h2 id="development">Development</h2>
+<pre><code class="lang-sh">cargo test --workspace --locked --no-fail-fast   # 373 tests
+cargo clippy --workspace --all-targets --locked -- -D warnings
+./scripts/ci-local.sh                            # the same checks CI runs</code></pre>
+<p>CI runs on Linux, macOS, and Windows on every push and pull request, and includes a bubblewrap sandbox smoke test on Linux. Pushing a <code>v*</code> tag builds release binaries for all three platforms, publishes them with <code>SHA256SUMS</code>, and signs every archive with a detached GPG signature when the <code>GPG_RELEASE_KEY</code> secret is configured.</p>
+<hr />
+<h2 id="status">Status</h2>
+<p><code>0.1.0</code> — an early, pre-1.0 release. Working today:</p>
+<ul>
+<li>Full language: modules, nominal <code>struct</code>/<code>enum</code>, <code>Result</code>/<code>?</code>, closures, type aliases</li>
+<li>Reactive native UI with components, themes, RTL text, and a terminal renderer</li>
+<li>Static type checker that gates execution</li>
+<li>Cooperative permission guard plus real OS sandbox scripts for all three platforms</li>
+<li><code>apm</code> with a signed, immutable local registry</li>
+<li>373 tests, green across Linux, macOS, and Windows</li>
+</ul>
+<p>Known boundaries, stated plainly:</p>
+<ul>
+<li>The APM registry is local-only — no HTTP registry client, no key rotation, and</li>
+</ul>
+<p>verification is not yet wired into runtime imports</p>
+<ul>
+<li><code>permissions</code> is an in-process guard, not OS isolation; use the sandbox scripts for</li>
+</ul>
+<p>untrusted input</p>
+<ul>
+<li>The macOS and Windows sandbox paths are written but not yet verified on their hosts</li>
+<li>No generic inference, async runtime, A2A protocol, or IDE</li>
+<li>The chatbot example is an offline echo, not a live model call</li>
+<li>Native UI support is x86_64 only; there is no aarch64 release</li>
+</ul>
+<hr />
+<h2 id="documentation">Documentation</h2>
+<table><thead><tr>
+<th>Document</th>
+<th>Contents</th>
+</tr></thead><tbody>
+<tr>
+<td><a href="docs/stdlib.md">Built-ins</a></td>
+<td>Every built-in, with argument notes</td>
+</tr>
+<tr>
+<td><a href="docs/components.md">Components</a></td>
+<td>Reusable components and scoped state</td>
+</tr>
+<tr>
+<td><a href="docs/themes.md">Themes</a></td>
+<td>Theme tokens, inheritance, precedence</td>
+</tr>
+<tr>
+<td><a href="docs/apm.md">APM</a></td>
+<td>Manifests, lockfile, keys, registry, verification</td>
+</tr>
+<tr>
+<td><a href="docs/release.md">Release guide</a></td>
+<td>Artifacts, checksums, maintainer procedure</td>
+</tr>
+<tr>
+<td><a href="docs/roadmap.html">Roadmap</a></td>
+<td>Feature status with per-item verification state</td>
+</tr>
+<tr>
+<td><a href="SECURITY.md">SECURITY.md</a></td>
+<td>Trust boundaries, sandbox status, reporting</td>
+</tr>
+<tr>
+<td><a href="CHANGELOG.md">CHANGELOG.md</a></td>
+<td>Release history</td>
+</tr>
+</tbody></table>
+<h2 id="contributing">Contributing</h2>
+<p>Issues and pull requests are welcome. Run <code>./scripts/ci-local.sh</code> before opening a pull request, and add a test that fails without your change.</p>
+<h2 id="license">License</h2>
+<p>Licensed under either of MIT or Apache-2.0, at your option.</p>
+<p>The full texts are the standard upstream documents:</p>
+<ul>
+<li>MIT: &lt;https://opensource.org/license/mit&gt;</li>
+<li>Apache-2.0: &lt;https://www.apache.org/licenses/license-2.0&gt;</li>
+</ul>
+  </article>
+</main>
+
+<footer>
+  <div class="foot">
+    <span>AEC — Agent Easy Creator</span>
+    <span class="links">
+      <a href="https://github.com/aec-lang/aec">GitHub</a>
+      <a href="https://github.com/aec-lang/aec/releases">Releases</a>
+      <a href="/registry.html">Registry</a>
+      <a href="/roadmap.html">Roadmap</a>
+    </span>
+    <span class="lic">MIT OR Apache-2.0</span>
+  </div>
+</footer>
+
+<script>window.AEC_INDEX = [{"url":"/guide.html","anchor":"","title":"Guide","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, verifies it against the published SHA256SUMS, and installs aec and apm into $HOME/.local/bin. <details <summary Manual download, or Windows</summary Grab the archive for your platform from the releases page, then verify it: Platform Archive Contains Linux x86 64 aec linux x86 64.tar.gz aec, apm macOS x86 64 aec macos x86 64.tar.gz aec, apm Windows x86 64 aec windows x86 64.zip aec.exe, apm.exe Windows is not covered by the shell installer; download the .zip and extract it. </details From source Requires Rust 1.75 or newer. Linux builds of the native UI also need the GTK, XCB, and OpenSSL developme"},{"url":"/guide.html","anchor":"contents","title":"Guide › Contents","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"install","title":"Guide › Install","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"try-it-in-30-seconds","title":"Guide › Try it in 30 seconds","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"the-language","title":"Guide › The language","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"native-ui","title":"Guide › Native UI","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"permissions","title":"Guide › Permissions","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"package-manager","title":"Guide › Package manager","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"os-sandbox","title":"Guide › OS sandbox","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"cli-reference","title":"Guide › CLI reference","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"architecture","title":"Guide › Architecture","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"development","title":"Guide › Development","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"status","title":"Guide › Status","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"documentation","title":"Guide › Documentation","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"contributing","title":"Guide › Contributing","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/guide.html","anchor":"license","title":"Guide › License","text":"<div align=\"center\" AEC — Agent Easy Creator A programming language for building AI agents, with a native UI in the same file. </div AEC is an interpreted language for agents. An agent's logic, its permissions, and its window are written in one .aec file, type checked before it runs, and rendered with a native egui window or a terminal UI. Contents Install · Try it in 30 seconds The language · Native UI · Permissions Package manager · Sandbox · CLI reference Architecture · Development · Status Install Prebuilt binaries (no Rust needed) This downloads the release archive for your platform, veri"},{"url":"/language.html","anchor":"","title":"Language reference","text":"AEC language guide Each source file starts with agent Name. A CLI entry point is usually fn main() int. Run cargo run p aec cli check path/to/file.aec before executing a program. Files and imports The imported file also starts with an agent header. Paths are resolved relative to the importing file. The CLI loads transitive imports once, rejects cycles, duplicate declarations, and checks the combined program. An unaliased import keeps the legacy flat namespace. Use pub on declarations that should be exposed through an alias; private functions, models, components, themes, and type aliases stay inside their module: Alias exports are explicit and private declarations are not exposed under the alias. Permissions and limits must be declared in the entry file; an imported file cannot override them. See examples/modules/. Values, bindings, and control flow let is immutable and var can be assigned to. A declared type uses name: type; functions use type. Types include int, float, string, bool, bytes, uuid, timestamp, unit, [type], type?, Result(type, type), and function. Literals include none, arrays, objects, durations such as 10s, and strings. Strings evaluate valid expressions in braces: "},{"url":"/language.html","anchor":"files-and-imports","title":"Language reference › Files and imports","text":"AEC language guide Each source file starts with agent Name. A CLI entry point is usually fn main() int. Run cargo run p aec cli check path/to/file.aec before executing a program. Files and imports The imported file also starts with an agent header. Paths are resolved relative to the importing file. The CLI loads transitive imports once, rejects cycles, duplicate declarations, and checks the combined program. An unaliased import keeps the legacy flat namespace. Use pub on declarations that should be exposed through an alias; private functions, models, components, themes, and type aliases stay i"},{"url":"/language.html","anchor":"values-bindings-and-control-flow","title":"Language reference › Values, bindings, and control flow","text":"AEC language guide Each source file starts with agent Name. A CLI entry point is usually fn main() int. Run cargo run p aec cli check path/to/file.aec before executing a program. Files and imports The imported file also starts with an agent header. Paths are resolved relative to the importing file. The CLI loads transitive imports once, rejects cycles, duplicate declarations, and checks the combined program. An unaliased import keeps the legacy flat namespace. Use pub on declarations that should be exposed through an alias; private functions, models, components, themes, and type aliases stay i"},{"url":"/language.html","anchor":"ui","title":"Language reference › UI","text":"AEC language guide Each source file starts with agent Name. A CLI entry point is usually fn main() int. Run cargo run p aec cli check path/to/file.aec before executing a program. Files and imports The imported file also starts with an agent header. Paths are resolved relative to the importing file. The CLI loads transitive imports once, rejects cycles, duplicate declarations, and checks the combined program. An unaliased import keeps the legacy flat namespace. Use pub on declarations that should be exposed through an alias; private functions, models, components, themes, and type aliases stay i"},{"url":"/language.html","anchor":"permissions","title":"Language reference › Permissions","text":"AEC language guide Each source file starts with agent Name. A CLI entry point is usually fn main() int. Run cargo run p aec cli check path/to/file.aec before executing a program. Files and imports The imported file also starts with an agent header. Paths are resolved relative to the importing file. The CLI loads transitive imports once, rejects cycles, duplicate declarations, and checks the combined program. An unaliased import keeps the legacy flat namespace. Use pub on declarations that should be exposed through an alias; private functions, models, components, themes, and type aliases stay i"},{"url":"/stdlib.html","anchor":"","title":"Built-in functions","text":"Built in functions Calls generally accept both dotted and underscored names, for example file.read(path) and file read(path). User defined pub declarations are exposed through their import alias (for example models.primary.think(...)); private declarations remain module local. The runtime validates argument counts before dispatch; the table below is the supported surface. Group Common calls Description Core print(...), len(value), str(value), int(value), float(value), bool(value) Output and conversion; print accepts any number of values Text upper, lower, trim, split, join, contains, replace, starts with, ends with String operations Collections push, push to, pop, sort, reverse, first, last, slice, range, keys, values, has Arrays and objects Results ok(value), err(value), is ok(value), is err(value) Result construction and inspection Files file.read, file.write, file.append, file.exists, file.delete, file.copy, file.mkdir, file.size, file.list dir Local file operations HTTP / JSON http.get, http.post, http.put, http.delete, json.parse, json.stringify Requests and JSON Environment env.get, env.set, sys.info, sys.args, sys.env all Process environment Time / math time.now ms, time.now"},{"url":"/components.html","anchor":"","title":"UI components","text":"UI components Declare a reusable component with props and a render body: Props are evaluated using the parent UI state. Each component instance receives an identity scoped local state map; its local @state is not inserted into the parent screen state. Local state is retained while the instance remains mounted and is discarded when a rebuild removes that instance. Screen level state is synchronized with the interpreter around events. Recursive component expansion is guarded. Public components imported with an alias are addressed as library.Component; private module components are available only inside their module. For a themed example, see examples/theme.aec."},{"url":"/themes.html","anchor":"","title":"Themes and styles","text":"Themes and styles Use theme Name default to select the active theme, or let the only declared theme become active. theme Ocean extends Dark inherits tokens and overrides entries it defines. Access tokens as theme.group.token. The renderer uses color.background for the panel, color.surface for cards, and color.text, text.size, text.weight as text defaults when available. Inline element properties override a style block. Missing tokens are ignored during rendering. See examples/theme.aec for a larger example."},{"url":"/apm.html","anchor":"","title":"Package manager","text":"APM APM is the AEC package manager. Its dependency commands continue to manage local path dependencies, and the MVP now supports a secure, offline, directory based package registry. There is no HTTP client or daemon. Local path dependencies Create or update apm.toml: apm init creates a manifest with a validated package name and version. apm add records a canonical local path in the manifest. apm install structurally validates every local dependency, reads its optional apm.toml, and writes the deterministic apm.lock file. apm list prints resolved names, versions, and paths; apm tree detects local cycles. apm remove updates the manifest and refreshes an existing lockfile. A manifest uses this format: Package names may contain ASCII letters, numbers, , and . Versions accept simple semantic version like strings such as 0.1.0 or 1.0.0 beta. The lockfile remains a local path lockfile and should be committed with the project. Registry publication and verification do not change this lockfile behavior or resolve registry dependencies yet. Signing keys Generate an unencrypted Ed25519 PKCS 8 v2 private key and a lowercase hexadecimal public key: The private key is written only to the requeste"},{"url":"/apm.html","anchor":"local-path-dependencies","title":"Package manager › Local path dependencies","text":"APM APM is the AEC package manager. Its dependency commands continue to manage local path dependencies, and the MVP now supports a secure, offline, directory based package registry. There is no HTTP client or daemon. Local path dependencies Create or update apm.toml: apm init creates a manifest with a validated package name and version. apm add records a canonical local path in the manifest. apm install structurally validates every local dependency, reads its optional apm.toml, and writes the deterministic apm.lock file. apm list prints resolved names, versions, and paths; apm tree detects loc"},{"url":"/apm.html","anchor":"signing-keys","title":"Package manager › Signing keys","text":"APM APM is the AEC package manager. Its dependency commands continue to manage local path dependencies, and the MVP now supports a secure, offline, directory based package registry. There is no HTTP client or daemon. Local path dependencies Create or update apm.toml: apm init creates a manifest with a validated package name and version. apm add records a canonical local path in the manifest. apm install structurally validates every local dependency, reads its optional apm.toml, and writes the deterministic apm.lock file. apm list prints resolved names, versions, and paths; apm tree detects loc"},{"url":"/apm.html","anchor":"local-registry","title":"Package manager › Local registry","text":"APM APM is the AEC package manager. Its dependency commands continue to manage local path dependencies, and the MVP now supports a secure, offline, directory based package registry. There is no HTTP client or daemon. Local path dependencies Create or update apm.toml: apm init creates a manifest with a validated package name and version. apm add records a canonical local path in the manifest. apm install structurally validates every local dependency, reads its optional apm.toml, and writes the deterministic apm.lock file. apm list prints resolved names, versions, and paths; apm tree detects loc"},{"url":"/release.html","anchor":"","title":"Release guide","text":"AEC release guide AEC 0.1.0 is the first release candidate for the interpreted language, native UI runtime, and local package tooling. The release unit contains the aec interpreter CLI, the apm package manager, source crates, examples, and documentation. Install from a checkout Rust and Cargo are required. From the repository root: Use offline only when the locked dependencies are already cached. Omit it for a normal first installation. The script installs both binaries into $PREFIX/bin; the default is Cargo's home directory. The equivalent manual command is: Verify a source build before installing: Release artifacts A tag matching v runs .github/workflows/release.yml. The workflow runs the locked workspace checks on Linux, macOS, and Windows, builds release binaries, and attaches these archives: Platform Archive Contents Linux x86 64 aec linux x86 64.tar.gz aec, apm macOS x86 64 aec macos x86 64.tar.gz aec, apm Windows x86 64 aec windows x86 64.zip aec.exe, apm.exe Every release also includes SHA256SUMS. Verify the downloaded archive before extracting it: The release workflow provides integrity checksums and reproducible build steps. It does not claim a detached signature for the "},{"url":"/release.html","anchor":"install-from-a-checkout","title":"Release guide › Install from a checkout","text":"AEC release guide AEC 0.1.0 is the first release candidate for the interpreted language, native UI runtime, and local package tooling. The release unit contains the aec interpreter CLI, the apm package manager, source crates, examples, and documentation. Install from a checkout Rust and Cargo are required. From the repository root: Use offline only when the locked dependencies are already cached. Omit it for a normal first installation. The script installs both binaries into $PREFIX/bin; the default is Cargo's home directory. The equivalent manual command is: Verify a source build before insta"},{"url":"/release.html","anchor":"release-artifacts","title":"Release guide › Release artifacts","text":"AEC release guide AEC 0.1.0 is the first release candidate for the interpreted language, native UI runtime, and local package tooling. The release unit contains the aec interpreter CLI, the apm package manager, source crates, examples, and documentation. Install from a checkout Rust and Cargo are required. From the repository root: Use offline only when the locked dependencies are already cached. Omit it for a normal first installation. The script installs both binaries into $PREFIX/bin; the default is Cargo's home directory. The equivalent manual command is: Verify a source build before insta"},{"url":"/release.html","anchor":"maintainer-release-procedure","title":"Release guide › Maintainer release procedure","text":"AEC release guide AEC 0.1.0 is the first release candidate for the interpreted language, native UI runtime, and local package tooling. The release unit contains the aec interpreter CLI, the apm package manager, source crates, examples, and documentation. Install from a checkout Rust and Cargo are required. From the repository root: Use offline only when the locked dependencies are already cached. Omit it for a normal first installation. The script installs both binaries into $PREFIX/bin; the default is Cargo's home directory. The equivalent manual command is: Verify a source build before insta"},{"url":"/release.html","anchor":"current-release-boundaries","title":"Release guide › Current release boundaries","text":"AEC release guide AEC 0.1.0 is the first release candidate for the interpreted language, native UI runtime, and local package tooling. The release unit contains the aec interpreter CLI, the apm package manager, source crates, examples, and documentation. Install from a checkout Rust and Cargo are required. From the repository root: Use offline only when the locked dependencies are already cached. Omit it for a normal first installation. The script installs both binaries into $PREFIX/bin; the default is Cargo's home directory. The equivalent manual command is: Verify a source build before insta"},{"url":"/presentation.html","anchor":"","title":"ارائه (فارسی)","text":"AEC — زبانی برای ساخت ایجنت‌های قابل‌استفاده متن معرفی برای شرکت‌های بزرگ، تیم‌های هوش مصنوعی، توسعه‌دهندگان و حامیان استعدادهای جوان سازنده: محمدمهدی علوی نسخهٔ ارائه: ۲۵ سپتامبر ۲۰۲۶ یادداشت شفافیت: این متن هم محصولی را که امروز واقعاً در مخزن و آزمون‌های محلی وجود دارد معرفی می‌کند، هم چشم‌انداز کامل آن را. دو بخش را عمداً از هم جدا کرده‌ایم. سن ۱۳ سال و زمان ساخت اولیهٔ حدود سه روز، مطابق گفتهٔ خود سازنده است؛ سن و بازهٔ زمانی را به‌عنوان ادعای مستقلِ راستی‌آزمایی‌شده عرضه نمی‌کنیم. متن آغاز ارائه تصور کنید برای ساخت یک ایجنت، مجبور نباشید منطق برنامه را در یک جا، رابط کاربری را در جایی دیگر، اتصال مدل را در لایه‌ای سوم و حافظه و مجوزهای دسترسی را در مجموعه‌ای از تنظیمات پراکنده مدیریت کنید. AEC یا Agent Easy Creator تلاشی است برای تبدیل این تجربه به یک زبان واحد: زبانی که بتوان در آن رفتار برنامه، رابط بومی، رویدادها، داده، اتصال به مدل و حافظهٔ مکالمه را با یک مدل ذهنی تعریف کرد. این پروژه صرفاً یک رابط روی یک API یا چند prompt کنار هم نیست. AEC یک دستور زبان اختصاصی، پارسر، درخت نحوی، بررسی‌گر ایستا، مفسر، کتابخانهٔ توابع داخلی، ابزار خط فرمان و لایهٔ رابط کاربری بومی دارد. همهٔ این اجزا در یک مخزن Rust با شش بخش اصلی کنار هم کار می‌کنند. و بخش شخصی داستان اینجاست: من، محمدم"},{"url":"/presentation.html","anchor":"متن-آغاز-ارائه","title":"ارائه (فارسی) › متن آغاز ارائه","text":"AEC — زبانی برای ساخت ایجنت‌های قابل‌استفاده متن معرفی برای شرکت‌های بزرگ، تیم‌های هوش مصنوعی، توسعه‌دهندگان و حامیان استعدادهای جوان سازنده: محمدمهدی علوی نسخهٔ ارائه: ۲۵ سپتامبر ۲۰۲۶ یادداشت شفافیت: این متن هم محصولی را که امروز واقعاً در مخزن و آزمون‌های محلی وجود دارد معرفی می‌کند، هم چشم‌انداز کامل آن را. دو بخش را عمداً از هم جدا کرده‌ایم. سن ۱۳ سال و زمان ساخت اولیهٔ حدود سه روز، مطابق گفتهٔ خود سازنده است؛ سن و بازهٔ زمانی را به‌عنوان ادعای مستقلِ راستی‌آزمایی‌شده عرضه نمی‌کنیم. متن آغاز ارائه تصور کنید برای ساخت یک ایجنت، مجبور نباشید منطق برنامه را در یک جا، رابط کاربری را در جایی دی"},{"url":"/presentation.html","anchor":"مسئله-ای-که-می-خواهم-حل-کنم","title":"ارائه (فارسی) › مسئله‌ای که می‌خواهم حل کنم","text":"AEC — زبانی برای ساخت ایجنت‌های قابل‌استفاده متن معرفی برای شرکت‌های بزرگ، تیم‌های هوش مصنوعی، توسعه‌دهندگان و حامیان استعدادهای جوان سازنده: محمدمهدی علوی نسخهٔ ارائه: ۲۵ سپتامبر ۲۰۲۶ یادداشت شفافیت: این متن هم محصولی را که امروز واقعاً در مخزن و آزمون‌های محلی وجود دارد معرفی می‌کند، هم چشم‌انداز کامل آن را. دو بخش را عمداً از هم جدا کرده‌ایم. سن ۱۳ سال و زمان ساخت اولیهٔ حدود سه روز، مطابق گفتهٔ خود سازنده است؛ سن و بازهٔ زمانی را به‌عنوان ادعای مستقلِ راستی‌آزمایی‌شده عرضه نمی‌کنیم. متن آغاز ارائه تصور کنید برای ساخت یک ایجنت، مجبور نباشید منطق برنامه را در یک جا، رابط کاربری را در جایی دی"},{"url":"/presentation.html","anchor":"aec-امروز-چه-چیزی-دارد","title":"ارائه (فارسی) › AEC امروز چه چیزی دارد؟","text":"AEC — زبانی برای ساخت ایجنت‌های قابل‌استفاده متن معرفی برای شرکت‌های بزرگ، تیم‌های هوش مصنوعی، توسعه‌دهندگان و حامیان استعدادهای جوان سازنده: محمدمهدی علوی نسخهٔ ارائه: ۲۵ سپتامبر ۲۰۲۶ یادداشت شفافیت: این متن هم محصولی را که امروز واقعاً در مخزن و آزمون‌های محلی وجود دارد معرفی می‌کند، هم چشم‌انداز کامل آن را. دو بخش را عمداً از هم جدا کرده‌ایم. سن ۱۳ سال و زمان ساخت اولیهٔ حدود سه روز، مطابق گفتهٔ خود سازنده است؛ سن و بازهٔ زمانی را به‌عنوان ادعای مستقلِ راستی‌آزمایی‌شده عرضه نمی‌کنیم. متن آغاز ارائه تصور کنید برای ساخت یک ایجنت، مجبور نباشید منطق برنامه را در یک جا، رابط کاربری را در جایی دی"},{"url":"/presentation.html","anchor":"معماری-شش-جزء-که-کنار-هم-زبان-را-می-سازند","title":"ارائه (فارسی) › معماری: شش جزء که کنار هم زبان را می‌سازند","text":"AEC — زبانی برای ساخت ایجنت‌های قابل‌استفاده متن معرفی برای شرکت‌های بزرگ، تیم‌های هوش مصنوعی، توسعه‌دهندگان و حامیان استعدادهای جوان سازنده: محمدمهدی علوی نسخهٔ ارائه: ۲۵ سپتامبر ۲۰۲۶ یادداشت شفافیت: این متن هم محصولی را که امروز واقعاً در مخزن و آزمون‌های محلی وجود دارد معرفی می‌کند، هم چشم‌انداز کامل آن را. دو بخش را عمداً از هم جدا کرده‌ایم. سن ۱۳ سال و زمان ساخت اولیهٔ حدود سه روز، مطابق گفتهٔ خود سازنده است؛ سن و بازهٔ زمانی را به‌عنوان ادعای مستقلِ راستی‌آزمایی‌شده عرضه نمی‌کنیم. متن آغاز ارائه تصور کنید برای ساخت یک ایجنت، مجبور نباشید منطق برنامه را در یک جا، رابط کاربری را در جایی دی"},{"url":"/presentation.html","anchor":"چه-چیزی-قابل-نشان-دادن-و-آزمودن-است","title":"ارائه (فارسی) › چه چیزی قابل نشان‌دادن و آزمودن است؟","text":"AEC — زبانی برای ساخت ایجنت‌های قابل‌استفاده متن معرفی برای شرکت‌های بزرگ، تیم‌های هوش مصنوعی، توسعه‌دهندگان و حامیان استعدادهای جوان سازنده: محمدمهدی علوی نسخهٔ ارائه: ۲۵ سپتامبر ۲۰۲۶ یادداشت شفافیت: این متن هم محصولی را که امروز واقعاً در مخزن و آزمون‌های محلی وجود دارد معرفی می‌کند، هم چشم‌انداز کامل آن را. دو بخش را عمداً از هم جدا کرده‌ایم. سن ۱۳ سال و زمان ساخت اولیهٔ حدود سه روز، مطابق گفتهٔ خود سازنده است؛ سن و بازهٔ زمانی را به‌عنوان ادعای مستقلِ راستی‌آزمایی‌شده عرضه نمی‌کنیم. متن آغاز ارائه تصور کنید برای ساخت یک ایجنت، مجبور نباشید منطق برنامه را در یک جا، رابط کاربری را در جایی دی"},{"url":"/presentation.html","anchor":"مسیر-رسیدن-به-تصویر-کامل-aec","title":"ارائه (فارسی) › مسیر رسیدن به تصویر کامل AEC","text":"AEC — زبانی برای ساخت ایجنت‌های قابل‌استفاده متن معرفی برای شرکت‌های بزرگ، تیم‌های هوش مصنوعی، توسعه‌دهندگان و حامیان استعدادهای جوان سازنده: محمدمهدی علوی نسخهٔ ارائه: ۲۵ سپتامبر ۲۰۲۶ یادداشت شفافیت: این متن هم محصولی را که امروز واقعاً در مخزن و آزمون‌های محلی وجود دارد معرفی می‌کند، هم چشم‌انداز کامل آن را. دو بخش را عمداً از هم جدا کرده‌ایم. سن ۱۳ سال و زمان ساخت اولیهٔ حدود سه روز، مطابق گفتهٔ خود سازنده است؛ سن و بازهٔ زمانی را به‌عنوان ادعای مستقلِ راستی‌آزمایی‌شده عرضه نمی‌کنیم. متن آغاز ارائه تصور کنید برای ساخت یک ایجنت، مجبور نباشید منطق برنامه را در یک جا، رابط کاربری را در جایی دی"},{"url":"/presentation.html","anchor":"چرا-سن-سازنده-در-این-داستان-مهم-است","title":"ارائه (فارسی) › چرا سن سازنده در این داستان مهم است؟","text":"AEC — زبانی برای ساخت ایجنت‌های قابل‌استفاده متن معرفی برای شرکت‌های بزرگ، تیم‌های هوش مصنوعی، توسعه‌دهندگان و حامیان استعدادهای جوان سازنده: محمدمهدی علوی نسخهٔ ارائه: ۲۵ سپتامبر ۲۰۲۶ یادداشت شفافیت: این متن هم محصولی را که امروز واقعاً در مخزن و آزمون‌های محلی وجود دارد معرفی می‌کند، هم چشم‌انداز کامل آن را. دو بخش را عمداً از هم جدا کرده‌ایم. سن ۱۳ سال و زمان ساخت اولیهٔ حدود سه روز، مطابق گفتهٔ خود سازنده است؛ سن و بازهٔ زمانی را به‌عنوان ادعای مستقلِ راستی‌آزمایی‌شده عرضه نمی‌کنیم. متن آغاز ارائه تصور کنید برای ساخت یک ایجنت، مجبور نباشید منطق برنامه را در یک جا، رابط کاربری را در جایی دی"},{"url":"/presentation.html","anchor":"پیشنهاد-همکاری-و-متن-پایان","title":"ارائه (فارسی) › پیشنهاد همکاری و متن پایان","text":"AEC — زبانی برای ساخت ایجنت‌های قابل‌استفاده متن معرفی برای شرکت‌های بزرگ، تیم‌های هوش مصنوعی، توسعه‌دهندگان و حامیان استعدادهای جوان سازنده: محمدمهدی علوی نسخهٔ ارائه: ۲۵ سپتامبر ۲۰۲۶ یادداشت شفافیت: این متن هم محصولی را که امروز واقعاً در مخزن و آزمون‌های محلی وجود دارد معرفی می‌کند، هم چشم‌انداز کامل آن را. دو بخش را عمداً از هم جدا کرده‌ایم. سن ۱۳ سال و زمان ساخت اولیهٔ حدود سه روز، مطابق گفتهٔ خود سازنده است؛ سن و بازهٔ زمانی را به‌عنوان ادعای مستقلِ راستی‌آزمایی‌شده عرضه نمی‌کنیم. متن آغاز ارائه تصور کنید برای ساخت یک ایجنت، مجبور نباشید منطق برنامه را در یک جا، رابط کاربری را در جایی دی"}];</script>
+<script src="/assets/site.js"></script>
+</body>
+</html>
