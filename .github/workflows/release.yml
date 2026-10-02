@@ -32,8 +32,16 @@ jobs:
         run: cargo check --workspace --locked
       - name: Test workspace
         run: cargo test --workspace --locked --no-fail-fast
+      - name: Test diagnostics
+        if: failure()
+        shell: bash
+        run: bash scripts/ci-diagnose.sh || true
       - name: Lint workspace
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Lint diagnostics
+        if: failure()
+        shell: bash
+        run: bash scripts/ci-clippy.sh || true
       - name: Build release binaries
         run: cargo build --release -p aec-cli --locked
       - name: Package workspace

@@ -24,6 +24,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libclang-dev libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev bubblewrap
       - name: Check workspace
         run: cargo check --workspace --locked
+      - name: Lint workspace
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Lint diagnostics
+        if: failure()
+        shell: bash
+        run: bash scripts/ci-clippy.sh || true
       - name: Test workspace
         run: cargo test --workspace --locked --no-fail-fast
       - name: Build release binary
