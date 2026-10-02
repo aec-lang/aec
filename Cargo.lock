@@ -116,7 +116,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "aec-ast"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "pretty_assertions",
  "thiserror 1.0.69",
@@ -125,7 +125,7 @@ dependencies = [
 
 [[package]]
 name = "aec-check"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aec-ast",
  "aec-parser",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "aec-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aec-ast",
  "aec-check",
@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "aec-parser"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aec-ast",
  "pest",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "aec-runtime"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aec-ast",
  "aec-parser",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "aec-ui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aec-ast",
  "aec-parser",

@@ -76,6 +76,31 @@ Registry verification is an integrity and materialization boundary. The resolved
 package is recorded in `apm.lock` with its tree digest, and the runtime re-checks
 that digest before executing imported cached code.
 
+## Install by name
+
+The fastest path is a bare package name. `apm install <name>` resolves the
+version from the registry's `packages/<name>/latest` pointer, downloads and
+verifies the signed payload, adds `registry://<name>@<version>` to
+`apm.toml`, and refreshes `apm.lock`:
+
+```sh
+apm install ui                # uses the default registry
+apm install ui --version 0.2.0
+apm install ui --registry https://my-mirror.example
+```
+
+The default registry is `https://aec-lang.github.io/apm-registry`, and the
+keys that are trusted by default are compiled into the binary. Both can be
+overridden:
+
+- `--registry URL` or `--registry DIR` on the command line
+- `AEC_APM_REGISTRY` environment variable
+- `--trust-key PATH` (one or more) to replace the built-in trust set
+
+A build that ships no built-in key refuses `apm install <name>` unless at
+least one `--trust-key` is given; the default release binary always ships at
+least the official signer's key.
+
 ## Remote registry
 
 The remote protocol is deliberately static: an HTTP(S) registry serves the same

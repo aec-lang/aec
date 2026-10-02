@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "apm")]
-#[command(version = "0.2.0")]
+#[command(version = "0.2.1")]
 #[command(about = "APM — the AEC package manager")]
 struct Cli {
     #[command(subcommand)]
@@ -20,8 +20,13 @@ enum Commands {
     Add { name: String, path: PathBuf },
     #[command(about = "Remove a local or registry dependency")]
     Remove { name: String },
-    #[command(about = "Resolve dependencies and write apm.lock")]
+    #[command(about = "Install a package by name, or resolve apm.toml and write apm.lock")]
     Install {
+        /// Package name to install from a registry. Omit to resolve apm.toml only.
+        name: Option<String>,
+        /// Explicit version. Omit to use the registry's `latest` pointer.
+        #[arg(long)]
+        version: Option<String>,
         #[arg(long)]
         registry: Option<String>,
         #[arg(long = "trust-key")]
@@ -91,6 +96,8 @@ fn run() -> Result<()> {
             println!("removed {}", name);
         }
         Commands::Install {
+            name,
+            version,
             registry,
             trust_keys,
         } => {
@@ -98,11 +105,21 @@ fn run() -> Result<()> {
                 .as_deref()
                 .map(package::parse_registry_location)
                 .transpose()?;
-            let lockfile = package::install_with_options(
-                &root,
-                registry.as_ref(),
-                &trust_keys,
-            )?;
+            let lockfile = match name {
+                Some(name) => package::install_named(
+                    &root,
+                    &name,
+                    version.as_deref(),
+                    registry.as_ref(),
+                    &trust_keys,
+                )?,
+                None => {
+                    if version.is_some() {
+                        anyhow::bail!("--version requires a package name");
+                    }
+                    package::install_with_options(&root, registry.as_ref(), &trust_keys)?
+                }
+            };
             println!("installed {} dependencies", lockfile.entries.len());
             for entry in lockfile.entries {
                 println!("{}@{} -> {}", entry.name, entry.version, entry.path);

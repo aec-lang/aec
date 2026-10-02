@@ -10,7 +10,7 @@
 
 بنا به گفتهٔ سازنده، محمدمهدی علوی، هنگام ساخت این پروژه **۱۳ ساله** بوده و تقریباً در **سه روز** آن را تا مرحلهٔ مطرح‌شده رسانده است. این سن و بازهٔ زمانی ادعای شخصی او هستند، نه نتیجهٔ مستقلاً راستی‌آزمایی‌شدهٔ git history. در معرفی بیرونی به همین دقت بیان شوند.
 
-**وضعیت آخرین اجرا (به‌روزرسانی ۲۰۲۶-۱۰-۰۲ برای v0.2.0):** `cargo test --workspace --locked --offline` با **۳۷۶ تست قبول و صفر شکست**؛ `cargo check --workspace --locked`، `cargo clippy --workspace --all-targets --locked -- -D warnings` و `cargo package --workspace --no-verify --locked` پاک. CI روی **هر سه سیستم‌عامل** (Linux/macOS/Windows) شامل `cargo check`، `test`، `clippy -D warnings`، build، package و smoke **سبز** است (ورک‌فلو `ci.yml`). `cargo fmt --all -- --check` هنوز به‌دلیل اختلاف‌های قالب‌بندی موجود در مخزن شکست می‌خورد؛ bulk-format انجام نشد.
+**وضعیت آخرین اجرا (به‌روزرسانی ۲۰۲۶-۱۰-۰۲ برای v0.2.0+):** `cargo test --workspace --locked --offline` با **۳۷۸ تست قبول و صفر شکست**؛ `cargo check --workspace --locked`، `cargo clippy --workspace --all-targets --locked -- -D warnings` و `cargo package --workspace --no-verify --locked` پاک. CI روی **هر سه سیستم‌عامل** (Linux/macOS/Windows) شامل `cargo check`، `test`، `clippy -D warnings`، build، package و smoke **سبز** است (ورک‌فلو `ci.yml`). `cargo fmt --all -- --check` هنوز به‌دلیل اختلاف‌های قالب‌بندی موجود در مخزن شکست می‌خورد؛ bulk-format انجام نشد.
 
 **انتشار:** release عمومی <https://github.com/aec-lang/aec/releases/tag/v0.1.0> منتشر شده است — `aec-linux/macos/windows`، `SHA256SUMS` و `.asc` برای هر سه. `gpg --verify` با کلید انتشار واقعی «Good signature» می‌دهد، `sha256sum --check` پاس می‌شود، و `scripts/install-release.sh` از همین آرشیوها نصب و باینری نصب‌شده اجرا شد. سایت مستندات آنلاین: <https://aec-lang.github.io/aec/>.
 
@@ -101,7 +101,7 @@ Builtinهای اصلی در `docs/stdlib.md` دسته‌بندی شده‌اند
 
 | هدف | فرمان | انتظار |
 |---|---|---|
-| همهٔ تست‌های محلی | `cargo test --workspace --locked --no-fail-fast -q` | در آخرین اجرا: ۳۷۶ قبول، ۰ شکست |
+| همهٔ تست‌های محلی | `cargo test --workspace --locked --no-fail-fast -q` | در آخرین اجرا: ۳۷۸ قبول، ۰ شکست |
 | ساخت/بررسی | `cargo check --workspace --locked` و `cargo clippy --workspace --all-targets --locked -- -D warnings` | در آخرین اجرا بدون warning |
 | چک نمونهٔ Theme | `cargo run -q -p aec-cli -- check examples/theme.aec` | parse/type-check موفق |
 | ماژول چندفایلی | `cargo run -q -p aec-cli -- run examples/modules/main.aec --cli` | مقدار بازگشتی ۴۲ |

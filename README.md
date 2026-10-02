@@ -247,7 +247,8 @@ registry, and an HTTP(S) registry client.
 ```sh
 apm init my-agent                        # create apm.toml
 apm add helper ./packages/helper         # local path dependency
-apm install                              # resolve, write apm.lock
+apm install ui                           # install by name from the default registry
+apm install                              # resolve apm.toml, write apm.lock
 apm list && apm tree
 ```
 
@@ -268,9 +269,15 @@ version is never replaced. Verification always requires an explicitly selected
 `--trust-key`; a public key embedded in registry metadata does not establish trust by
 itself.
 
-Remote registries are also supported by passing an HTTP(S) base URL to `apm install`
-or `apm verify`. The server must expose the same `packages/<name>/<version>/`
-layout as a local registry. Multiple public keys may be listed in one trust-key file
+`apm install <name>` resolves the version from the default registry's
+`packages/<name>/latest` pointer, verifies the signed payload, and records
+`registry://<name>@<version>` in `apm.toml`. The default registry is
+`https://aec-lang.github.io/apm-registry` and can be overridden with
+`--registry` or the `AEC_APM_REGISTRY` environment variable.
+
+Any HTTP(S) base URL can be passed to `apm install` or `apm verify`. The
+server must expose the same `packages/<name>/<version>/` layout as a local
+registry. Multiple public keys may be listed in one trust-key file
 or passed with repeated `--trust-key` flags, which permits signer rotation without
 trusting a key merely because it appears in metadata. Before execution, imported
 cached registry payloads are re-hashed and compared with `apm.lock`.
@@ -362,7 +369,7 @@ crypto, UUID, OpenAI-compatible model calls, and SQLite-backed conversation memo
 ## Development
 
 ```sh
-cargo test --workspace --locked --no-fail-fast   # 376 tests
+cargo test --workspace --locked --no-fail-fast   # 378 tests
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ./scripts/ci-local.sh                            # the same checks CI runs
 ```
@@ -385,7 +392,7 @@ detached GPG signature when the `GPG_RELEASE_KEY` secret is configured.
 - `apm` with a signed, immutable registry, an HTTP(S) registry client, signer
   rotation via multiple trust keys, and re-verification of imported cached packages
   before every `aec run`
-- 376 tests, green across Linux, macOS, and Windows
+- 378 tests, green across Linux, macOS, and Windows
 
 Known boundaries, stated plainly:
 

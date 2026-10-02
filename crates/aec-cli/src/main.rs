@@ -13,7 +13,7 @@ use render::{render as render_diag, Level};
 
 #[derive(Parser)]
 #[command(name = "aec")]
-#[command(version = "0.2.0")]
+#[command(version = "0.2.1")]
 #[command(about = "AEC — Agent Easy Creator", long_about = None)]
 struct Cli {
     #[command(subcommand)]
