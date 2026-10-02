@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs clippy and turns each diagnostic into a GitHub annotation, so a lint
-# failure is readable without a log download.
+# failure is readable without a log download (the log server can be blocked).
 #
 # Usage: scripts/ci-clippy.sh
 set -uo pipefail
@@ -12,21 +12,26 @@ log=$(mktemp)
 cargo clippy --workspace --all-targets --locked -- -D warnings >"$log" 2>&1
 status=$?
 
-# GitHub reads one annotation per `::error::` line. Emitting every diagnostic
-# line (bounded) is simpler and more robust than parsing multi-line blocks.
-count=0
-while IFS= read -r line; do
-    case "$line" in
-        warning*|error*)
-            # Escape the workflow-command payload characters.
-            safe=${line//'%'/'%25'}
-            printf '::error title=clippy::%s\n' "$safe"
-            count=$((count + 1))
-            [ "$count" -ge 40 ] && break
-            ;;
-    esac
-done < "$log"
+emit() {
+    # %25 escapes `%`, and %0A keeps a multi-line payload in one command.
+    local payload=${1//'%'/'%25'}
+    printf '::error title=clippy::%s\n' "$payload"
+}
 
-echo "--- clippy exit status: $status (emitted $count diagnostics) ---"
+# Any line that carries a diagnostic is emitted; the leading whitespace clippy
+# uses for context lines is trimmed so nothing is missed.
+grep -nE '(^|[[:space:]])(warning|error)(\[[^]]*\])?: ' "$log" | head -40 | while IFS= read -r match; do
+    emit "$match"
+done
+
+# Belt and braces: if nothing matched, dump the tail so there is still evidence.
+if ! grep -qE '(^|[[:space:]])(warning|error)(\[[^]]*\])?: ' "$log"; then
+    emit "no diagnostic lines matched; last output follows"
+    tail -25 "$log" | while IFS= read -r line; do
+        emit "$line"
+    done
+fi
+
+echo "check-run annotations emitted; clippy exit status: $status"
 rm -f "$log"
 exit "$status"
