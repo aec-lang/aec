@@ -50,11 +50,9 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          {
-            echo "### CI diagnostics — ${{ runner.os }}"
-            echo '```'
-            rustc --version
-            cargo check --workspace --locked 2>&1 | tail -30 || true
-            cargo test --workspace --locked --no-fail-fast 2>&1 | grep -E "test result:|panicked at|FAILED|failures:" -A 4 | tail -60 || true
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          # Emitting `::error::` workflow commands turns the failing test names
+          # and panic messages into check-run annotations, which are readable
+          # from the API without a log download.
+          echo "### CI diagnostics — ${{ runner.os }}"
+          rustc --version
+          bash scripts/ci-diagnose.sh || true
