@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "apm")]
-#[command(version = "0.1.0")]
+#[command(version = "0.2.0")]
 #[command(about = "APM — the AEC package manager")]
 struct Cli {
     #[command(subcommand)]
@@ -23,7 +23,7 @@ enum Commands {
     #[command(about = "Resolve dependencies and write apm.lock")]
     Install {
         #[arg(long)]
-        registry: Option<PathBuf>,
+        registry: Option<String>,
         #[arg(long = "trust-key")]
         trust_keys: Vec<PathBuf>,
     },
@@ -52,7 +52,7 @@ enum Commands {
     #[command(about = "Verify a signed package version with an explicit trust key")]
     Verify {
         #[arg(long)]
-        registry: PathBuf,
+        registry: String,
         #[arg(long)]
         name: String,
         #[arg(long)]
@@ -94,9 +94,13 @@ fn run() -> Result<()> {
             registry,
             trust_keys,
         } => {
+            let registry = registry
+                .as_deref()
+                .map(package::parse_registry_location)
+                .transpose()?;
             let lockfile = package::install_with_options(
                 &root,
-                registry.as_deref(),
+                registry.as_ref(),
                 &trust_keys,
             )?;
             println!("installed {} dependencies", lockfile.entries.len());
@@ -142,8 +146,8 @@ fn run() -> Result<()> {
             version,
             trust_keys,
         } => {
-            let verified =
-                package::verify_package_with_trust_keys(&registry, &name, &version, &trust_keys)?;
+            let registry = package::parse_registry_location(&registry)?;
+            let verified = package::verify_package_at(&registry, &name, &version, &trust_keys)?;
             println!(
                 "verified {}@{} tree {}",
                 verified.name, verified.version, verified.tree_digest

@@ -1,6 +1,7 @@
 # APM
 
-APM is the AEC package manager. Its dependency commands continue to manage local path dependencies, and the MVP now supports a secure, offline, directory-based package registry. There is no HTTP client or daemon.
+APM is the AEC package manager. It supports local path dependencies and signed
+registries served either from a directory or over HTTP(S).
 
 ## Local path dependencies
 
@@ -40,7 +41,7 @@ apm keygen --private-key ./keys/signing.pkcs8 --public-key ./keys/signing.pub
 
 The private key is written only to the requested file. On Unix it is created with mode `0600`, and publishing rejects private keys readable by group or other users. Symlinks, invalid keys, and private keys located inside the registry or package payload are rejected. The registry and source package must also use separate directory trees. Registry commands never add private key bytes or paths to command output, registry metadata, or `apm.lock`; generated `*.pkcs8` files are ignored by Git.
 
-The public key is informational inside registry metadata. It does not establish trust by itself. Verification always requires `--trust-key PATH`, and that key must be explicitly selected and stored outside the registry.
+The public key is informational inside registry metadata. It does not establish trust by itself. Verification always requires one or more explicitly selected `--trust-key PATH` files, stored outside the registry. A trust file may contain multiple public-key lines; this is the key-rotation mechanism. During rotation, keep both the old and new keys trusted, publish with the new key, then remove the old key after all clients have migrated.
 
 ## Local registry
 
@@ -71,6 +72,29 @@ The canonical `metadata` file is UTF-8, line-based, LF-terminated, and sorted by
 
 Payload traversal rejects symbolic links, FIFOs, sockets, devices, and other special files. The MVP limits are 10,000 files, 10,000 total payload entries including directories, 16 MiB per file, 256 MiB total payload size, 1,024 UTF-8 bytes per relative path, 64 directory levels, and 32 MiB of metadata.
 
-Registry verification is currently an initial integrity and materialization boundary only. It is not wired into runtime import resolution, and `apm install` still records local paths.
+Registry verification is an integrity and materialization boundary. The resolved
+package is recorded in `apm.lock` with its tree digest, and the runtime re-checks
+that digest before executing imported cached code.
+
+## Remote registry
+
+The remote protocol is deliberately static: an HTTP(S) registry serves the same
+layout shown above. Install and verify download signed metadata first, then stream
+each signed payload file, enforce size limits, recompute SHA-256 and the aggregate
+tree digest, and only then commit the package to `.apm/packages`.
+
+```sh
+apm install \
+  --registry https://registry.example.invalid \
+  --trust-key ./keys/old.pub \
+  --trust-key ./keys/new.pub
+
+apm verify --registry https://registry.example.invalid \
+  --name helper --version 0.2.0 \
+  --trust-key ./keys/new.pub
+```
+
+When an AEC program imports a cached package, `aec run` re-verifies its complete
+payload against the tree digest recorded in `apm.lock` before executing code.
 
 The older `aec add`/`aec install` commands and legacy `aecpm.toml`/`aecpm.lock` files remain readable for migration, but new projects should use the `apm` binary and filenames.

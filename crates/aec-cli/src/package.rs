@@ -55,6 +55,9 @@ pub struct LockEntry {
     pub name: String,
     pub version: String,
     pub path: String,
+    /// SHA-256 tree digest of the verified registry package payload, when the
+    /// dependency came from a registry. Local path dependencies have none.
+    pub tree: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,12 +72,53 @@ struct RegistryCoordinate {
     source: String,
 }
 
+/// Where a signed registry lives: a local directory tree, or a server that
+/// serves the same `packages/<name>/<version>/...` layout over HTTP(S).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegistryLocation {
+    Local(PathBuf),
+    Remote(String),
+}
+
+/// Parses a `--registry` value, which is either a directory path or an
+/// HTTP(S) base URL.
+///
+/// Plain `http://` is allowed because signatures protect integrity even
+/// without TLS, but production registries should use HTTPS for privacy.
+pub fn parse_registry_location(value: &str) -> Result<RegistryLocation> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        bail!("registry must be a directory path or an HTTP(S) URL");
+    }
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        let mut url = reqwest::Url::parse(trimmed).context("registry URL is invalid")?;
+        if !matches!(url.scheme(), "http" | "https") {
+            bail!("registry URL must use http or https");
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            bail!("registry URL must not embed credentials");
+        }
+        if url.query().is_some() || url.fragment().is_some() {
+            bail!("registry URL must not contain a query or fragment");
+        }
+        if url.path().contains("..") {
+            bail!("registry URL path must not contain '..'");
+        }
+        let normalized_path = url.path().trim_end_matches('/').to_string();
+        url.set_path(&normalized_path);
+        Ok(RegistryLocation::Remote(url.to_string()))
+    } else {
+        Ok(RegistryLocation::Local(PathBuf::from(trimmed)))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ResolvedDependency {
     name: String,
     version: String,
     path: PathBuf,
     manifest: Option<Manifest>,
+    tree_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,7 +223,7 @@ pub fn install(root: &Path) -> Result<Lockfile> {
 
 pub fn install_with_options(
     root: &Path,
-    registry: Option<&Path>,
+    registry: Option<&RegistryLocation>,
     trust_keys: &[PathBuf],
 ) -> Result<Lockfile> {
     install_impl(root, registry, trust_keys, false)
@@ -191,7 +235,7 @@ pub fn refresh_lockfile(root: &Path) -> Result<Lockfile> {
 
 pub fn refresh_lockfile_with_options(
     root: &Path,
-    registry: Option<&Path>,
+    registry: Option<&RegistryLocation>,
     trust_keys: &[PathBuf],
 ) -> Result<Lockfile> {
     install_impl(root, registry, trust_keys, true)
@@ -203,7 +247,7 @@ pub fn has_lockfile(root: &Path) -> Result<bool> {
 
 fn install_impl(
     root: &Path,
-    registry: Option<&Path>,
+    registry: Option<&RegistryLocation>,
     trust_keys: &[PathBuf],
     refresh: bool,
 ) -> Result<Lockfile> {
@@ -235,7 +279,7 @@ fn install_impl(
 fn build_lockfile(
     root: &Path,
     manifest: &Manifest,
-    registry: Option<&Path>,
+    registry: Option<&RegistryLocation>,
     trust_keys: &[PathBuf],
 ) -> Result<Lockfile> {
     let mut entries = Vec::with_capacity(manifest.dependencies.len());
@@ -245,6 +289,7 @@ fn build_lockfile(
             name: dependency.name,
             version: dependency.version,
             path: lock_path_for(root, &dependency.path)?,
+            tree: dependency.tree_digest,
         });
     }
     entries.sort_by(|left, right| left.name.cmp(&right.name));
@@ -256,7 +301,7 @@ fn build_lockfile(
 fn validate_dependency_graph(
     root: &Path,
     manifest: &Manifest,
-    registry: Option<&Path>,
+    registry: Option<&RegistryLocation>,
     trust_keys: &[PathBuf],
 ) -> Result<()> {
     let canonical_root =
@@ -277,7 +322,7 @@ fn validate_dependency_graph(
 fn validate_graph(
     manifest: &Manifest,
     directory: &Path,
-    registry: Option<&Path>,
+    registry: Option<&RegistryLocation>,
     trust_keys: &[PathBuf],
     stack: &mut BTreeSet<PathBuf>,
     visited: &mut BTreeSet<PathBuf>,
@@ -479,6 +524,10 @@ fn validate_lock_shape(lockfile: &Lockfile) -> Result<()> {
         {
             bail!("lockfile dependency '{}' has an invalid path", entry.name);
         }
+        if let Some(tree) = &entry.tree {
+            validate_sha256_hex(tree, "lockfile tree digest")
+                .with_context(|| format!("lockfile dependency '{}'", entry.name))?;
+        }
         if previous.is_some_and(|name| name >= entry.name.as_str()) {
             bail!("lockfile entries must be sorted by unique name");
         }
@@ -494,12 +543,21 @@ fn serialize_lockfile(lockfile: &Lockfile) -> Result<String> {
     validate_lock_shape(lockfile)?;
     let mut source = String::from("# generated by apm install\n");
     for entry in &lockfile.entries {
-        source.push_str(&format!(
-            "{} = {{ version = \"{}\", path = \"{}\" }}\n",
-            entry.name,
-            escape(&entry.version),
-            escape(&entry.path)
-        ));
+        match &entry.tree {
+            Some(tree) => source.push_str(&format!(
+                "{} = {{ version = \"{}\", path = \"{}\", tree = \"{}\" }}\n",
+                entry.name,
+                escape(&entry.version),
+                escape(&entry.path),
+                tree
+            )),
+            None => source.push_str(&format!(
+                "{} = {{ version = \"{}\", path = \"{}\" }}\n",
+                entry.name,
+                escape(&entry.version),
+                escape(&entry.path)
+            )),
+        }
     }
     Ok(source)
 }
@@ -532,11 +590,15 @@ fn parse_lockfile(source: &str) -> Result<Lockfile> {
             .and_then(|value| value.strip_suffix('}'))
             .context("lockfile entry must be an inline table")?;
         let fields = split_inline_fields(inner)?;
-        if fields.len() != 2 {
-            bail!("lockfile entry '{}' must contain version and path", name);
+        if fields.len() < 2 || fields.len() > 3 {
+            bail!(
+                "lockfile entry '{}' must contain version, path and an optional tree digest",
+                name
+            );
         }
         let mut version = None;
         let mut path = None;
+        let mut tree = None;
         for field in fields {
             let (key, raw_field_value) = field
                 .split_once('=')
@@ -551,6 +613,9 @@ fn parse_lockfile(source: &str) -> Result<Lockfile> {
                 "path" if path.is_none() => {
                     path = Some(parse_quoted_lock_value(raw_field_value.trim(), "lockfile path")?);
                 }
+                "tree" if tree.is_none() => {
+                    tree = Some(parse_quoted_lock_value(raw_field_value.trim(), "lockfile tree")?);
+                }
                 _ => bail!("lockfile entry '{}' contains an unknown field", name),
             }
         }
@@ -558,6 +623,7 @@ fn parse_lockfile(source: &str) -> Result<Lockfile> {
             name: name.to_string(),
             version: version.context("lockfile entry is missing version")?,
             path: path.context("lockfile entry is missing path")?,
+            tree,
         });
     }
     let lockfile = Lockfile { entries };
@@ -985,7 +1051,7 @@ fn resolve_dependency(
     root: &Path,
     name: &str,
     raw_path: &str,
-    registry: Option<&Path>,
+    registry: Option<&RegistryLocation>,
     trust_keys: &[PathBuf],
 ) -> Result<ResolvedDependency> {
     if let Some(coordinate) = parse_registry_coordinate(raw_path)? {
@@ -995,13 +1061,22 @@ fn resolve_dependency(
         if trust_keys.is_empty() {
             bail!("registry dependency requires at least one --trust-key");
         }
-        let verified = verify_package_with_trust_keys(
-            registry,
-            &coordinate.name,
-            &coordinate.version,
-            trust_keys,
-        )?;
-        let path = materialize_registry_package(root, &coordinate, registry, &verified)?;
+        let (path, tree_digest) = match registry {
+            RegistryLocation::Local(registry_path) => {
+                let verified = verify_package_with_trust_keys(
+                    registry_path,
+                    &coordinate.name,
+                    &coordinate.version,
+                    trust_keys,
+                )?;
+                let path =
+                    materialize_registry_package(root, &coordinate, registry_path, &verified)?;
+                (path, verified.tree_digest)
+            }
+            RegistryLocation::Remote(base) => {
+                remote::install(root, &coordinate, base, trust_keys)?
+            }
+        };
         let manifest = load_optional_manifest(&path)?;
         let manifest = manifest.context("materialized registry package is missing apm.toml")?;
         if manifest.name != coordinate.name || manifest.version != coordinate.version {
@@ -1012,6 +1087,7 @@ fn resolve_dependency(
             version: coordinate.version,
             path,
             manifest: Some(manifest),
+            tree_digest: Some(tree_digest),
         });
     }
     let path = PathBuf::from(resolve_dependency_path(root, Path::new(raw_path))?);
@@ -1034,6 +1110,7 @@ fn resolve_dependency(
             .unwrap_or_else(|| "*".to_string()),
         path,
         manifest,
+        tree_digest: None,
     })
 }
 
@@ -1083,21 +1160,15 @@ fn materialize_registry_package(
     registry: &Path,
     verified: &RegistryPackage,
 ) -> Result<PathBuf> {
+    if let Some(payload) = cached_package_payload(root, coordinate, &verified.tree_digest)? {
+        return Ok(payload);
+    }
     let cache_root = root.join(CACHE_DIRECTORY);
     create_real_directory(&cache_root)?;
     let packages = cache_root.join(REGISTRY_PACKAGES_DIRECTORY);
     create_real_directory(&packages)?;
     let package_parent = packages.join(&coordinate.name);
     create_real_directory(&package_parent)?;
-    let destination = package_parent.join(&coordinate.version);
-    if path_exists(&destination)? {
-        ensure_real_directory(&destination)?;
-        let inspection = inspect_payload(&destination)?;
-        if inspection.tree_digest != verified.tree_digest {
-            bail!("cached registry package '{}' has a different tree digest", coordinate.name);
-        }
-        return Ok(destination);
-    }
     let staging_root = cache_root.join(REGISTRY_STAGING_DIRECTORY);
     create_real_directory(&staging_root)?;
     let staging_directory = create_staging_directory(&staging_root)?;
@@ -1126,24 +1197,65 @@ fn materialize_registry_package(
     if manifest.name != coordinate.name || manifest.version != coordinate.version {
         bail!("registry payload identity changed after verification");
     }
-    if path_exists(&destination)? {
-        drop(guard);
-        ensure_real_directory(&destination)?;
-        let existing = inspect_payload(&destination)?;
-        if existing.tree_digest != verified.tree_digest {
-            bail!("cached registry package '{}' has a different tree digest", coordinate.name);
-        }
-        return Ok(destination);
+    commit_staged_package(root, coordinate, &verified.tree_digest, staging_directory, guard)
+}
+
+/// Returns the cached payload directory when an installed copy of
+/// `coordinate` exists and still hashes to `tree_digest`.
+///
+/// The payload directory is the one that contains `apm.toml`, so callers can
+/// treat the returned path as the package root.
+fn cached_package_payload(
+    root: &Path,
+    coordinate: &RegistryCoordinate,
+    tree_digest: &str,
+) -> Result<Option<PathBuf>> {
+    let destination = root
+        .join(CACHE_DIRECTORY)
+        .join(REGISTRY_PACKAGES_DIRECTORY)
+        .join(&coordinate.name)
+        .join(&coordinate.version);
+    if !path_exists(&destination)? {
+        return Ok(None);
     }
+    ensure_real_directory(&destination)?;
+    let payload_destination = destination.join(REGISTRY_PAYLOAD_DIRECTORY);
+    ensure_real_directory(&payload_destination)?;
+    let existing = inspect_payload(&payload_destination)?;
+    if existing.tree_digest != tree_digest {
+        bail!(
+            "cached registry package '{}' has a different tree digest",
+            coordinate.name
+        );
+    }
+    Ok(Some(payload_destination))
+}
+
+/// Atomically moves a verified staged package into the on-disk cache and
+/// returns the payload directory that becomes the lockfile package root.
+fn commit_staged_package(
+    root: &Path,
+    coordinate: &RegistryCoordinate,
+    tree_digest: &str,
+    staging_directory: PathBuf,
+    guard: StagingGuard,
+) -> Result<PathBuf> {
+    let packages = root.join(CACHE_DIRECTORY).join(REGISTRY_PACKAGES_DIRECTORY);
+    create_real_directory(&packages)?;
+    let package_parent = packages.join(&coordinate.name);
+    create_real_directory(&package_parent)?;
+    let destination = package_parent.join(&coordinate.version);
+    let payload_destination = destination.join(REGISTRY_PAYLOAD_DIRECTORY);
     if let Err(error) = rename_no_replace(&staging_directory, &destination) {
         if path_exists(&destination)? {
             drop(guard);
-            ensure_real_directory(&destination)?;
-            let existing = inspect_payload(&destination)?;
-            if existing.tree_digest == verified.tree_digest {
-                return Ok(destination);
-            }
-            bail!("cached registry package '{}' has a different tree digest", coordinate.name);
+            return match cached_package_payload(root, coordinate, tree_digest)? {
+                Some(payload) => Ok(payload),
+                None => bail!(
+                    "cached registry package '{}' appeared and vanished while installing",
+                    coordinate.name
+                ),
+            };
         }
         return Err(error).with_context(|| {
             format!(
@@ -1153,7 +1265,7 @@ fn materialize_registry_package(
         });
     }
     drop(guard);
-    Ok(destination)
+    Ok(payload_destination)
 }
 
 fn escape(value: &str) -> String {
@@ -1204,6 +1316,8 @@ struct ParsedMetadata {
     manifest_digest: String,
     tree_digest: String,
     public_key: String,
+    /// Every signed payload file record: relative path, size, SHA-256.
+    files: Vec<PayloadFile>,
 }
 
 struct StagingGuard {
@@ -1356,6 +1470,105 @@ pub fn verify_package(
 ) -> Result<RegistryPackage> {
     let trust_key_path = trust_key_path.to_path_buf();
     verify_package_with_trust_keys(registry, name, version, &[trust_key_path])
+}
+
+/// Verifies `name@version` against a local directory registry or a remote
+/// HTTP(S) registry, using the explicit trust key set.
+pub fn verify_package_at(
+    location: &RegistryLocation,
+    name: &str,
+    version: &str,
+    trust_key_paths: &[PathBuf],
+) -> Result<RegistryPackage> {
+    validate_package_name(name)?;
+    validate_version(version)?;
+    if trust_key_paths.is_empty() {
+        bail!("at least one explicit trust key is required");
+    }
+    match location {
+        RegistryLocation::Local(path) => {
+            verify_package_with_trust_keys(path, name, version, trust_key_paths)
+        }
+        RegistryLocation::Remote(base) => remote::verify_only(base, name, version, trust_key_paths),
+    }
+}
+
+/// Re-verifies every cached registry package that the program imports.
+///
+/// `source_files` are the source paths a loaded program pulled in. Any file
+/// under `<root>/.apm/packages/<name>/<version>/payload` pins its package,
+/// whose whole payload tree is re-hashed and compared with the tree digest
+/// recorded in `apm.lock` at install time. A cache that was edited by hand
+/// therefore fails before the program runs — no network access needed.
+pub fn verify_cached_packages(root: &Path, source_files: &[PathBuf]) -> Result<()> {
+    let canonical_root =
+        fs::canonicalize(root).with_context(|| format!("cannot resolve {}", root.display()))?;
+    let packages_root = canonical_root
+        .join(CACHE_DIRECTORY)
+        .join(REGISTRY_PACKAGES_DIRECTORY);
+    let mut imported: BTreeSet<(String, String)> = BTreeSet::new();
+    for source in source_files {
+        let canonical = fs::canonicalize(source)
+            .with_context(|| format!("cannot resolve {}", source.display()))?;
+        let Ok(relative) = canonical.strip_prefix(&packages_root) else {
+            continue;
+        };
+        let mut components = relative.components();
+        let name = components
+            .next()
+            .and_then(|component| component.as_os_str().to_str())
+            .context("cached package path has no package name")?
+            .to_string();
+        let version = components
+            .next()
+            .and_then(|component| component.as_os_str().to_str())
+            .context("cached package path has no package version")?
+            .to_string();
+        match components.next() {
+            Some(component) if component.as_os_str() == REGISTRY_PAYLOAD_DIRECTORY => {}
+            _ => bail!(
+                "cached path {} is not inside a package payload",
+                canonical.display()
+            ),
+        }
+        validate_package_name(&name)
+            .with_context(|| format!("cached package path {}", canonical.display()))?;
+        validate_version(&version)
+            .with_context(|| format!("cached package path {}", canonical.display()))?;
+        imported.insert((name, version));
+    }
+    if imported.is_empty() {
+        return Ok(());
+    }
+    let lockfile = load_lockfile(&canonical_root)?.context(
+        "the program imports installed registry packages but apm.lock is missing; run apm install",
+    )?;
+    for (name, version) in imported {
+        let entry = lockfile
+            .entries
+            .iter()
+            .find(|entry| entry.name == name && entry.version == version)
+            .with_context(|| {
+                format!("package '{name}@{version}' is imported but not recorded in apm.lock; run apm install")
+            })?;
+        let tree = entry.tree.as_deref().with_context(|| {
+            format!("package '{name}@{version}' has no recorded tree digest; run apm install to refresh apm.lock")
+        })?;
+        let payload = packages_root
+            .join(&name)
+            .join(&version)
+            .join(REGISTRY_PAYLOAD_DIRECTORY);
+        ensure_real_directory(&payload).with_context(|| {
+            format!("package '{name}@{version}' is missing from the package cache; run apm install")
+        })?;
+        let inspection = inspect_payload(&payload)?;
+        if inspection.tree_digest != tree {
+            bail!(
+                "cached package '{name}@{version}' was modified after install; run 'apm install' to restore it before running"
+            );
+        }
+    }
+    Ok(())
 }
 
 pub fn verify_package_with_trust_keys(
@@ -2062,6 +2275,7 @@ fn parse_registry_metadata(source: &[u8]) -> Result<ParsedMetadata> {
     let mut seen_paths = BTreeSet::new();
     let mut listed_size = 0_u64;
     let mut listed_files = 0_usize;
+    let mut files = Vec::new();
     for line in lines {
         listed_files += 1;
         if listed_files > file_count {
@@ -2075,7 +2289,7 @@ fn parse_registry_metadata(source: &[u8]) -> Result<ParsedMetadata> {
         let path =
             String::from_utf8(path_bytes).context("registry metadata file path is not UTF-8")?;
         validate_registry_path(&path)?;
-        if !seen_paths.insert(path) {
+        if !seen_paths.insert(path.clone()) {
             bail!("registry metadata contains a duplicate file path");
         }
         let size = parse_metadata_u64(fields[2], "metadata file size")?;
@@ -2089,6 +2303,11 @@ fn parse_registry_metadata(source: &[u8]) -> Result<ParsedMetadata> {
         if listed_size > MAX_PACKAGE_TOTAL_SIZE {
             bail!("registry metadata exceeds the payload size limit");
         }
+        files.push(PayloadFile {
+            path,
+            size,
+            digest: fields[3].to_string(),
+        });
     }
     if listed_files != file_count {
         bail!("registry metadata file count does not match its records");
@@ -2100,6 +2319,7 @@ fn parse_registry_metadata(source: &[u8]) -> Result<ParsedMetadata> {
         manifest_digest,
         tree_digest,
         public_key,
+        files,
     })
 }
 
@@ -2216,6 +2436,358 @@ fn rename_no_replace(source: &Path, destination: &Path) -> Result<()> {
     Ok(fs::rename(source, destination)?)
 }
 
+/// HTTP(S) registry client.
+///
+/// A remote registry serves exactly the same directory layout as a local one
+/// (`packages/<name>/<version>/{metadata,signature,payload/...}`) over plain
+/// GET requests, so any static file server can host a registry. Verification
+/// is identical to the local path: the metadata and its detached Ed25519
+/// signature are checked against the explicit trust key set first, then every
+/// payload file is downloaded and checked against the signed size and
+/// SHA-256 records before the aggregate tree digest and the canonical
+/// metadata checks close the loop. Only a fully verified payload is moved
+/// into the project cache.
+mod remote {
+    use super::*;
+    use std::time::Duration;
+
+    const METADATA_LIMIT: u64 = MAX_METADATA_SIZE;
+    const SIGNATURE_LIMIT: u64 = SIGNATURE_BYTES as u64;
+    const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+    const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+    const MAX_REDIRECTS: usize = 5;
+
+    fn client() -> Result<reqwest::blocking::Client> {
+        reqwest::blocking::Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
+            .build()
+            .map_err(|error| anyhow::anyhow!("cannot create the registry HTTP client: {error}"))
+    }
+
+    fn get_limited(
+        client: &reqwest::blocking::Client,
+        url: &reqwest::Url,
+        limit: u64,
+        label: &str,
+    ) -> Result<Vec<u8>> {
+        let response = client
+            .get(url.clone())
+            .send()
+            .with_context(|| format!("cannot reach {label} at {url}"))?
+            .error_for_status()
+            .with_context(|| format!("registry refused to serve {label} at {url}"))?;
+        let mut bytes = Vec::new();
+        let mut reader = response.take(limit.saturating_add(1));
+        reader
+            .read_to_end(&mut bytes)
+            .with_context(|| format!("cannot download {label} from {url}"))?;
+        if bytes.len() as u64 > limit {
+            bail!("{label} exceeds the limit of {limit} bytes");
+        }
+        Ok(bytes)
+    }
+
+    fn package_url(base: &str, name: &str, version: &str) -> Result<reqwest::Url> {
+        let mut url = reqwest::Url::parse(base).context("registry URL is invalid")?;
+        url.path_segments_mut()
+            .map_err(|_| anyhow::anyhow!("registry URL cannot accept path segments"))?
+            .pop_if_empty()
+            .extend(["packages", name, version]);
+        Ok(url)
+    }
+
+    fn join_segment(url: &reqwest::Url, segment: &str) -> Result<reqwest::Url> {
+        let mut joined = url.clone();
+        joined
+            .path_segments_mut()
+            .map_err(|_| anyhow::anyhow!("registry URL cannot accept path segments"))?
+            .pop_if_empty()
+            .push(segment);
+        Ok(joined)
+    }
+
+    fn payload_file_url(
+        base: &str,
+        name: &str,
+        version: &str,
+        relative: &str,
+    ) -> Result<reqwest::Url> {
+        let package_base = package_url(base, name, version)?;
+        let mut url = join_segment(&package_base, REGISTRY_PAYLOAD_DIRECTORY)?;
+        {
+            let mut segments = url
+                .path_segments_mut()
+                .map_err(|_| anyhow::anyhow!("registry URL cannot accept path segments"))?;
+            for segment in relative.split('/') {
+                segments.push(segment);
+            }
+        }
+        Ok(url)
+    }
+
+    fn load_trust_keys(trust_key_paths: &[PathBuf]) -> Result<Vec<[u8; PUBLIC_KEY_BYTES]>> {
+        let mut trust_keys: Vec<[u8; PUBLIC_KEY_BYTES]> = Vec::new();
+        for trust_key_path in trust_key_paths {
+            ensure_no_symlink_components(trust_key_path)?;
+            for key in read_trust_keys(trust_key_path)? {
+                if !trust_keys.contains(&key) {
+                    trust_keys.push(key);
+                }
+            }
+        }
+        if trust_keys.is_empty() {
+            bail!("the trust key file does not contain a public key");
+        }
+        Ok(trust_keys)
+    }
+
+    struct SignedMetadata {
+        metadata: Vec<u8>,
+        parsed: ParsedMetadata,
+        signing_key_hex: String,
+    }
+
+    /// Downloads the metadata and signature and checks both against the trust
+    /// key set. Everything the rest of the download relies on (file list,
+    /// sizes, digests, tree digest) is only trusted after this succeeds.
+    fn fetch_signed_metadata(
+        client: &reqwest::blocking::Client,
+        base: &str,
+        coordinate: &RegistryCoordinate,
+        trust_keys: &[[u8; PUBLIC_KEY_BYTES]],
+    ) -> Result<SignedMetadata> {
+        let package_base = package_url(base, &coordinate.name, &coordinate.version)?;
+        let metadata_url = join_segment(&package_base, REGISTRY_METADATA_FILE)?;
+        let metadata = get_limited(client, &metadata_url, METADATA_LIMIT, "registry metadata")?;
+        let parsed = parse_registry_metadata(&metadata)?;
+        let signing_key = trust_keys
+            .iter()
+            .find(|key| encode_hex(*key) == parsed.public_key)
+            .context("registry public key does not match the explicit trust key set")?;
+        let signature_url = join_segment(&package_base, REGISTRY_SIGNATURE_FILE)?;
+        let signature = get_limited(client, &signature_url, SIGNATURE_LIMIT, "registry signature")?;
+        if signature.len() != SIGNATURE_BYTES {
+            bail!("registry signature has an invalid length");
+        }
+        UnparsedPublicKey::new(&ED25519, signing_key)
+            .verify(&metadata, &signature)
+            .map_err(|_| anyhow::anyhow!("registry signature verification failed"))?;
+        Ok(SignedMetadata {
+            metadata,
+            parsed,
+            signing_key_hex: encode_hex(signing_key),
+        })
+    }
+
+    fn stream_file(
+        client: &reqwest::blocking::Client,
+        url: &reqwest::Url,
+        destination: &mut File,
+        expected: &PayloadFile,
+    ) -> Result<()> {
+        let response = client
+            .get(url.clone())
+            .send()
+            .with_context(|| format!("cannot reach payload file '{}' at {url}", expected.path))?
+            .error_for_status()
+            .with_context(|| {
+                format!(
+                    "registry refused to serve payload file '{}' at {url}",
+                    expected.path
+                )
+            })?;
+        let mut hasher = Sha256::new();
+        let mut size = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
+        let mut reader = response.take(expected.size.saturating_add(1));
+        loop {
+            let read = reader
+                .read(&mut buffer)
+                .with_context(|| format!("cannot download payload file '{}'", expected.path))?;
+            if read == 0 {
+                break;
+            }
+            size = size
+                .checked_add(read as u64)
+                .context("payload file size overflow")?;
+            if size > expected.size {
+                bail!(
+                    "downloaded file '{}' exceeds its signed size of {} bytes",
+                    expected.path,
+                    expected.size
+                );
+            }
+            destination
+                .write_all(&buffer[..read])
+                .with_context(|| format!("cannot write staged file '{}'", expected.path))?;
+            hasher.update(&buffer[..read]);
+        }
+        if size != expected.size {
+            bail!(
+                "downloaded file '{}' has {size} bytes but the metadata lists {}",
+                expected.path,
+                expected.size
+            );
+        }
+        let digest = encode_hex(&hasher.finalize());
+        if digest != expected.digest {
+            bail!(
+                "downloaded file '{}' does not match its signed SHA-256 digest",
+                expected.path
+            );
+        }
+        Ok(())
+    }
+
+    fn download_payload(
+        client: &reqwest::blocking::Client,
+        base: &str,
+        coordinate: &RegistryCoordinate,
+        staged_payload: &Path,
+        parsed: &ParsedMetadata,
+    ) -> Result<()> {
+        let mut total = 0_u64;
+        for file in &parsed.files {
+            total = total.checked_add(file.size).context("payload size overflow")?;
+            if total > MAX_PACKAGE_TOTAL_SIZE {
+                bail!("payload exceeds the total size limit of {MAX_PACKAGE_TOTAL_SIZE} bytes");
+            }
+            let destination = staged_payload.join(&file.path);
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!("cannot create staged directory {}", parent.display())
+                })?;
+            }
+            let mut destination_file = create_payload_file(&destination)?;
+            let url = payload_file_url(base, &coordinate.name, &coordinate.version, &file.path)?;
+            stream_file(client, &url, &mut destination_file, file)?;
+            destination_file
+                .sync_all()
+                .with_context(|| format!("cannot sync staged file {}", destination.display()))?;
+        }
+        Ok(())
+    }
+
+    struct VerifiedDownload {
+        package: RegistryPackage,
+        staging_directory: PathBuf,
+        guard: StagingGuard,
+    }
+
+    /// Downloads every signed payload file into a private staging directory
+    /// and re-runs the full local verification on what landed on disk.
+    fn download_verified(
+        client: &reqwest::blocking::Client,
+        base: &str,
+        coordinate: &RegistryCoordinate,
+        signed: &SignedMetadata,
+        staging_root: &Path,
+    ) -> Result<VerifiedDownload> {
+        let staging_directory = create_staging_directory(staging_root)?;
+        let guard = StagingGuard {
+            path: staging_directory.clone(),
+        };
+        let staged_payload = staging_directory.join(REGISTRY_PAYLOAD_DIRECTORY);
+        fs::create_dir(&staged_payload).with_context(|| {
+            format!(
+                "cannot create registry download staging directory {}",
+                staged_payload.display()
+            )
+        })?;
+        download_payload(client, base, coordinate, &staged_payload, &signed.parsed)?;
+        let manifest = load_registry_manifest(&staged_payload)?;
+        if manifest.name != coordinate.name || manifest.version != coordinate.version {
+            bail!("downloaded package identity does not match the request");
+        }
+        let inspection = inspect_payload(&staged_payload)?;
+        if inspection.tree_digest != signed.parsed.tree_digest {
+            bail!("downloaded payload does not match the signed tree digest");
+        }
+        let canonical = canonical_metadata(&manifest, &inspection, &signed.signing_key_hex);
+        if canonical.as_bytes() != signed.metadata.as_slice() {
+            bail!("registry metadata is not canonical for the payload");
+        }
+        Ok(VerifiedDownload {
+            package: RegistryPackage {
+                name: coordinate.name.clone(),
+                version: coordinate.version.clone(),
+                tree_digest: signed.parsed.tree_digest.clone(),
+            },
+            staging_directory,
+            guard,
+        })
+    }
+
+    /// Installs `name@version` from a remote registry into the project cache.
+    /// Returns the cached payload directory and the verified tree digest.
+    pub(super) fn install(
+        root: &Path,
+        coordinate: &RegistryCoordinate,
+        base: &str,
+        trust_key_paths: &[PathBuf],
+    ) -> Result<(PathBuf, String)> {
+        // Offline fast path: a lockfile-recorded digest matched by an intact
+        // cache means no network round trip is needed at all.
+        if let Some(lockfile) = load_lockfile(root)? {
+            if let Some(entry) = lockfile.entries.iter().find(|entry| {
+                entry.name == coordinate.name && entry.version == coordinate.version
+            }) {
+                if let Some(tree) = &entry.tree {
+                    if let Some(payload) = cached_package_payload(root, coordinate, tree)? {
+                        return Ok((payload, tree.clone()));
+                    }
+                }
+            }
+        }
+        let trust_keys = load_trust_keys(trust_key_paths)?;
+        let client = client()?;
+        let signed = fetch_signed_metadata(&client, base, coordinate, &trust_keys)?;
+        if let Some(payload) =
+            cached_package_payload(root, coordinate, &signed.parsed.tree_digest)?
+        {
+            return Ok((payload, signed.parsed.tree_digest));
+        }
+        let cache_root = root.join(CACHE_DIRECTORY);
+        create_real_directory(&cache_root)?;
+        let staging_root = cache_root.join(REGISTRY_STAGING_DIRECTORY);
+        create_real_directory(&staging_root)?;
+        let download = download_verified(&client, base, coordinate, &signed, &staging_root)?;
+        let payload = commit_staged_package(
+            root,
+            coordinate,
+            &signed.parsed.tree_digest,
+            download.staging_directory,
+            download.guard,
+        )?;
+        Ok((payload, signed.parsed.tree_digest))
+    }
+
+    /// Verifies `name@version` against a remote registry without installing
+    /// it. The downloaded payload lives in a temporary staging directory that
+    /// is removed when this function returns.
+    pub(super) fn verify_only(
+        base: &str,
+        name: &str,
+        version: &str,
+        trust_key_paths: &[PathBuf],
+    ) -> Result<RegistryPackage> {
+        let coordinate = RegistryCoordinate {
+            name: name.to_string(),
+            version: version.to_string(),
+            source: String::new(),
+        };
+        let trust_keys = load_trust_keys(trust_key_paths)?;
+        let client = client()?;
+        let signed = fetch_signed_metadata(&client, base, &coordinate, &trust_keys)?;
+        let staging_root = std::env::temp_dir().join("apm-verify-staging");
+        create_real_directory(&staging_root)?;
+        let download = download_verified(&client, base, &coordinate, &signed, &staging_root)?;
+        Ok(download.package)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2316,6 +2888,35 @@ mod tests {
     }
 
     #[test]
+    fn registry_locations_normalize_urls_and_reject_credentials() {
+        assert_eq!(
+            parse_registry_location("https://example.test/registry/").unwrap(),
+            RegistryLocation::Remote("https://example.test/registry".to_string())
+        );
+        assert!(parse_registry_location("https://user:secret@example.test").is_err());
+        assert!(parse_registry_location("https://example.test/?token=1").is_err());
+        assert_eq!(
+            parse_registry_location("./registry").unwrap(),
+            RegistryLocation::Local(PathBuf::from("./registry"))
+        );
+    }
+
+    #[test]
+    fn trust_key_files_accept_multiple_rotation_keys() {
+        let root = fixture();
+        let key_file = root.join("trusted.pub");
+        fs::write(
+            &key_file,
+            format!("{}\n{}\n", "11".repeat(PUBLIC_KEY_BYTES), "22".repeat(PUBLIC_KEY_BYTES)),
+        )
+        .unwrap();
+        let keys = read_trust_keys(&key_file).unwrap();
+        assert_eq!(keys.len(), 2);
+        assert_ne!(keys[0], keys[1]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn registry_metadata_is_deterministic_for_the_same_payload() {
         let root = fixture();
         save_manifest(
@@ -2336,6 +2937,47 @@ mod tests {
         let second = canonical_metadata(&manifest, &inspection, &public_key);
         assert_eq!(first, second);
         assert!(parse_registry_metadata(first.as_bytes()).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn commit_staged_package_creates_missing_parent_directories() {
+        // Regression: the remote install path did not create
+        // `.apm/packages/<name>/` before renaming staging into place, so a
+        // fresh consumer project failed with "No such file or directory".
+        let root = fixture();
+        let coordinate = RegistryCoordinate {
+            name: "helper".to_string(),
+            version: "1.0.0".to_string(),
+            source: String::new(),
+        };
+        let cache_root = root.join(CACHE_DIRECTORY);
+        create_real_directory(&cache_root).unwrap();
+        let staging_root = cache_root.join(REGISTRY_STAGING_DIRECTORY);
+        create_real_directory(&staging_root).unwrap();
+        let staging_directory = create_staging_directory(&staging_root).unwrap();
+        let staged_payload = staging_directory.join(REGISTRY_PAYLOAD_DIRECTORY);
+        fs::create_dir(&staged_payload).unwrap();
+        save_manifest(
+            &staged_payload,
+            &Manifest {
+                name: "helper".to_string(),
+                version: "1.0.0".to_string(),
+                dependencies: BTreeMap::new(),
+            },
+        )
+        .unwrap();
+        let tree = inspect_payload(&staged_payload).unwrap().tree_digest;
+        let guard = StagingGuard {
+            path: staging_directory.clone(),
+        };
+        let payload =
+            commit_staged_package(&root, &coordinate, &tree, staging_directory, guard).unwrap();
+        assert!(payload.ends_with("payload"));
+        assert!(payload.join(MANIFEST_FILE).exists());
+        // A second call must find the cached copy without renaming again.
+        let cached = cached_package_payload(&root, &coordinate, &tree).unwrap();
+        assert_eq!(cached.as_deref(), Some(payload.as_path()));
         fs::remove_dir_all(root).unwrap();
     }
 

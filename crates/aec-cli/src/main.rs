@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use colored::*;
 use std::path::{Path, PathBuf};
@@ -13,7 +13,7 @@ use render::{render as render_diag, Level};
 
 #[derive(Parser)]
 #[command(name = "aec")]
-#[command(version = "0.1.0")]
+#[command(version = "0.2.0")]
 #[command(about = "AEC — Agent Easy Creator", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -59,7 +59,7 @@ enum Commands {
     /// Resolve dependencies and write apm.lock
     Install {
         #[arg(long)]
-        registry: Option<PathBuf>,
+        registry: Option<String>,
         #[arg(long = "trust-key")]
         trust_keys: Vec<PathBuf>,
     },
@@ -143,9 +143,12 @@ fn cmd_remove(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_install(registry: Option<&Path>, trust_keys: &[PathBuf]) -> Result<()> {
+fn cmd_install(registry: Option<&str>, trust_keys: &[PathBuf]) -> Result<()> {
     let root = std::env::current_dir()?;
-    let lockfile = package::install_with_options(&root, registry, trust_keys)?;
+    let registry = registry
+        .map(package::parse_registry_location)
+        .transpose()?;
+    let lockfile = package::install_with_options(&root, registry.as_ref(), trust_keys)?;
     println!("{} {} dependencies", "✅ Installed".green().bold(), lockfile.entries.len());
     for entry in lockfile.entries {
         println!("   {}@{} -> {}", entry.name, entry.version, entry.path);
@@ -395,6 +398,14 @@ fn cmd_run(file: &Path, entry: &str, force_cli: bool, tui: bool) -> Result<()> {
             std::process::exit(1);
         }
     };
+    let project_root = std::env::current_dir()?;
+    let imported_sources = loaded
+        .sources
+        .iter()
+        .map(|source| source.path.clone())
+        .collect::<Vec<_>>();
+    package::verify_cached_packages(&project_root, &imported_sources)
+        .context("registry package verification failed before execution")?;
     let program = &loaded.program;
 
     // Gate: a program with type errors must not execute.

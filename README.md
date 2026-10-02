@@ -241,8 +241,8 @@ Reference: [language guide § Permissions](docs/language.md#permissions) · [SEC
 
 ## Package manager
 
-`apm` is AEC's package manager. It has the commands you expect and a signed,
-immutable local registry.
+`apm` is AEC's package manager. It has the commands you expect, a signed immutable
+registry, and an HTTP(S) registry client.
 
 ```sh
 apm init my-agent                        # create apm.toml
@@ -268,9 +268,12 @@ version is never replaced. Verification always requires an explicitly selected
 `--trust-key`; a public key embedded in registry metadata does not establish trust by
 itself.
 
-**Current boundary:** the registry is a local directory. There is no HTTP registry
-client and no key rotation yet, and registry verification is not wired into runtime
-import resolution — `apm install` still records local paths.
+Remote registries are also supported by passing an HTTP(S) base URL to `apm install`
+or `apm verify`. The server must expose the same `packages/<name>/<version>/`
+layout as a local registry. Multiple public keys may be listed in one trust-key file
+or passed with repeated `--trust-key` flags, which permits signer rotation without
+trusting a key merely because it appears in metadata. Before execution, imported
+cached registry payloads are re-hashed and compared with `apm.lock`.
 
 Reference: [APM](docs/apm.md)
 
@@ -359,7 +362,7 @@ crypto, UUID, OpenAI-compatible model calls, and SQLite-backed conversation memo
 ## Development
 
 ```sh
-cargo test --workspace --locked --no-fail-fast   # 373 tests
+cargo test --workspace --locked --no-fail-fast   # 376 tests
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ./scripts/ci-local.sh                            # the same checks CI runs
 ```
@@ -379,13 +382,13 @@ detached GPG signature when the `GPG_RELEASE_KEY` secret is configured.
 - Reactive native UI with components, themes, RTL text, and a terminal renderer
 - Static type checker that gates execution
 - Cooperative permission guard plus real OS sandbox scripts for all three platforms
-- `apm` with a signed, immutable local registry
-- 373 tests, green across Linux, macOS, and Windows
+- `apm` with a signed, immutable registry, an HTTP(S) registry client, signer
+  rotation via multiple trust keys, and re-verification of imported cached packages
+  before every `aec run`
+- 376 tests, green across Linux, macOS, and Windows
 
 Known boundaries, stated plainly:
 
-- The APM registry is local-only — no HTTP registry client, no key rotation, and
-  verification is not yet wired into runtime imports
 - `permissions` is an in-process guard, not OS isolation; use the sandbox scripts for
   untrusted input
 - The macOS and Windows sandbox paths are written but not yet verified on their hosts
