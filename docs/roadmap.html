@@ -159,7 +159,7 @@
         این گزارش بر اساس دامنهٔ <b>واقعیِ</b> پروژه نوشته شده: AEC یک <b>زبان</b> است
         (سینتکس + Runtime + UI Engine)، نه اکوسیستمی چندساله. سند اولیه به‌عنوان آرمان کنار گذاشته شد.
       </p>
-      <div class="meta">مخزن: <span class="kbd">/home/mamadi/aec</span> · به‌روزرسانی: ۲۰۲۶-۱۰-۰۱ · <b>۳۷۳ تست سبز</b> · <b>CI سه‌سکویی موفق</b></div>
+      <div class="meta">مخزن: <span class="kbd">aec-lang/aec</span> · به‌روزرسانی: ۲۰۲۶-۱۰-۰۲ · <b>۳۷۳ تست سبز</b> · <b>CI سه‌سکویی موفق</b> · <b>release v0.1.0 منتشر شد</b></div>
     </div>
     <div class="donut">
       <svg width="190" height="190" viewBox="0 0 190 190">
@@ -172,7 +172,7 @@
         <circle class="val" cx="95" cy="95" r="80" />
       </svg>
       <div class="center">
-        <div class="num">۹۵<small>٪</small></div>
+        <div class="num">۹۷<small>٪</small></div>
         <div class="lbl">دامنهٔ زبان · با احتساب مرزهای باز</div>
       </div>
     </div>
@@ -199,7 +199,7 @@
       <p style="margin:0 0 8px">نسخهٔ قبلی این صفحه همه‌چیز را ۱۰۰٪ می‌نمود. آن ادعا درست نبود: امضای GPG هرگز اجرا نشد و sandbox مک/ویندوز روی میزبان خودشان آزموده نشد. وضعیت صادقانه:</p>
       <ol style="margin:8px 18px 0; padding:0; line-height:1.9">
         <li>✓ <b>نوع nominal:</b> <span class="kbd">struct</span>/<span class="kbd">enum</span> با constructor، alias، namespace، equality و pattern matching پیاده و تست شده‌اند.</li>
-        <li>✓ <b>سه سیستم‌عامل:</b> workflow روی Linux، macOS و Windows با run <span class="kbd">36091198326</span> موفق شد.</li>
+        <li>✓ <b>سه سیستم‌عامل:</b> workflow روی Linux، macOS و Windows (build، test، clippy، package، smoke) روی tag <span class="kbd">v0.1.0</span> موفق شد.</li>
         <li>✓ <b>سندباکس لینوکس:</b> bubblewrap واقعاً اجرا شد؛ خواندن بیرون از workspace و نوشتن داخل آن هر دو fail-closed شدند (<span class="kbd">scripts/sandbox-selftest.sh</span>).</li>
         <li>○ <b>سندباکس macOS و Windows:</b> کد نوشته و از نظر نحوی بررسی شد، ولی روی میزبان آن سیستم‌عامل‌ها اجرا نشده. اسکریپت Windows هم از <span class="kbd">Start-Job</span> (که اصلاً مرز امنیتی نیست) به Windows Sandbox واقعی تغییر کرد.</li>
         <li>✓ <b>امضای release:</b> <span class="kbd">scripts/sign-release.sh</span> با یک کلید موقت ساخته و <span class="kbd">gpg --verify</span> روی خروجی موفق شد. کلید واقعی انتشار باید در CI به‌صورت secret تنظیم شود.</li>
@@ -215,11 +215,11 @@
       <h2 style="margin:0 0 8px">مرزهای باز — چیزهایی که ۱۰۰٪ نیستند</h2>
       <ul style="margin:6px 18px 0; padding:0; line-height:1.9">
         <li><b>registry خارجی:</b> APM فقط پوشهٔ محلی است. کلاینت HTTP، چرخش کلید و اتصال verification به import رانتایم وجود ندارد.</li>
-        <li><b>سندباکس مک/ویندوز:</b> نوشته شده، اجرا نشده. بدون این دو، پوشش سه‌سکویی کامل نیست.</li>
-        <li><b>انتشار واقعی:</b> تا لحظهٔ نوشتن هیچ release یا tag‌ای وجود ندارد؛ یعنی «از کجا دانلود کنم» هنوز پاسخ عملی ندارد.</li>
-        <li><b>QA بصری روی سه سیستم‌عامل:</b> تست‌ها headless هستند و روی لینوکس اجرا می‌شوند. بازبینی چشمی پنجرهٔ native روی هر سه سیستم‌عامل انجام نشده.</li>
+        <li><b>سندباکس مک/ویندوز:</b> کد نوشته شده ولی روی میزبان خودشان اجرا نشده؛ <span class="kbd">sandbox-selftest.sh</span> برای این دو <span class="kbd">untested</span> گزارش می‌دهد. بدون این دو، پوشش سه‌سکویی sandbox کامل نیست.</li>
+        <li><b>QA بصری روی مک/ویندوز:</b> تست‌ها headless و روی هر سه سیستم‌عامل سبزند، اما بازبینی چشمی پنجرهٔ native روی مک و ویندوز انجام نشده.</li>
         <li><b>معماری:</b> بدون generic inference، runtime ناهمگام، پروتکل A2A و IDE.</li>
       </ul>
+      <p style="margin:12px 0 0"><b>بسته‌شده در این جلسه (۲۰۲۶-۱۰-۰۲):</b> <b>انتشار واقعی</b> — release <span class="kbd">v0.1.0</span> با سه آرشیو Linux/macOS/Windows، <span class="kbd">SHA256SUMS</span> و امضای GPG منتشر شد و <span class="kbd">install-release.sh</span> از همان آرشیوها نصب می‌کند؛ و <b>CI سه‌سکویی</b> که سه شکست واقعی داشت (مسیر sandbox، termios ویندوز، و symlink سیستمی مک/ویندوز) و هر سه رفع شد.</p>
     </div>
   </div>
 
@@ -279,19 +279,19 @@
       <tr><td class="f">Type Checker</td><td class="c">۵٪</td><td><span class="badge ok">✓ ۱۰۰٪</span> <span class="tag">nominal type، UI، arity، named args و unknown calls</span></td><td class="c">۵٪</td></tr>
       <tr><td class="f">Persistent Memory (SQLite)</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۱۰۰٪</span></td><td class="c">۳٪</td></tr>
       <tr><td class="f">محافظ مجوزهای درون مفسر</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۱۰۰٪</span> <span class="tag">shell.run، env و memory پایدار کنترل می‌شوند؛ OS sandbox نیست</span></td><td class="c">۳٪</td></tr>
-      <tr><td class="f">Package Manager (APM)</td><td class="c">۲٪</td><td><span class="badge mid">◐ ۶۰٪</span> <span class="tag">path + registry محلی امضاشده؛ بدون کلاینت HTTP و بدون چرخش کلید</span></td><td class="c">۱.۲٪</td></tr>
-      <tr><td class="f">Cross-platform Build</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۱۰۰٪</span> <span class="tag">Linux/macOS/Windows با run 36091198326 موفق</span></td><td class="c">۳٪</td></tr>
-      <tr><td class="f">سندباکس سیستم‌عامل</td><td class="c">۵٪</td><td><span class="badge mid">◐ ۴۰٪</span> <span class="tag">لینوکس تأییدشده (bwrap)؛ مک/ویندوز نوشته ولی اجرا نشده</span></td><td class="c">۲٪</td></tr>
-      <tr><td class="f">انتشار و امضا</td><td class="c">۳٪</td><td><span class="badge mid">◐ ۵۰٪</span> <span class="tag">اسکریپت امضا با کلید موقت تست شد؛ release/tag هنوز منتشر نشده</span></td><td class="c">۱.۵٪</td></tr>
+      <tr><td class="f">Package Manager (APM)</td><td class="c">۲٪</td><td><span class="badge mid">◐ ۸۰٪</span> <span class="tag">پکیج امضاشدهٔ واقعی publish/verify شد؛ کلاینت شبکه‌ای و چرخش کلید باقی است</span></td><td class="c">۱.۶٪</td></tr>
+      <tr><td class="f">Cross-platform Build</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۱۰۰٪</span> <span class="tag">build/test/clippy/package روی Linux/macOS/Windows + artifact منتشرشده</span></td><td class="c">۳٪</td></tr>
+      <tr><td class="f">سندباکس سیستم‌عامل</td><td class="c">۵٪</td><td><span class="badge mid">◐ ۶۰٪</span> <span class="tag">لینوکس تأییدشده (bwrap، fail-closed)؛ مک/ویندوز نوشته ولی اجرا نشده</span></td><td class="c">۳٪</td></tr>
+      <tr><td class="f">انتشار و امضا</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۱۰۰٪</span> <span class="tag">release v0.1.0 با tar.gz/zip سه‌سکویی، SHA256SUMS و امضای GPG واقعی</span></td><td class="c">۳٪</td></tr>
       <tr><td class="f">Testing (۳۷۳ تست)</td><td class="c">۳٪</td><td><span class="badge ok">✓ ۱۰۰٪</span> <span class="tag">۳۷۳ تست سبز؛ همهٔ ۹ مثال type-check می‌شوند</span></td><td class="c">۳٪</td></tr>
       <tr><td class="f">Docs</td><td class="c">۲٪</td><td><span class="badge ok">✓ ۱۰۰٪</span> <span class="tag">README کامل + language/stdlib/components/themes/APM/release/SECURITY</span></td><td class="c">۲٪</td></tr>
       <tr><td class="f">Examples</td><td class="c">۲٪</td><td><span class="badge ok">✓ ۱۰۰٪</span> <span class="tag">ماژول، nominal، UI، تم، حافظه، sandbox و chatbot</span></td><td class="c">۲٪</td></tr>
-      <tr class="total"><td colspan="3">جمع وزنی: ۱۰۸.۵ از ۱۱۴ — سه ردیف آخر وزن تازه دارند و مرزهای باز در آن‌ها کسر شده</td><td class="c">≈ ۹۵٪</td></tr>
+      <tr class="total"><td colspan="3">جمع وزنی: ۱۱۸.۳۵ از ۱۲۲ — مرزهای باز مک/ویندوز و registry شبکه‌ای در آن‌ها کسر شده</td><td class="c">≈ ۹۷٪</td></tr>
     </table>
   </div>
   <p class="hint" style="margin-top:14px">
-    وزن‌ها جمعاً ۱۱۴ هستند. سه ردیف تازه (<b>سندباکس سیستم‌عامل</b>، <b>انتشار و امضا</b>) قبلاً اصلاً وزن نداشتند و
-    به‌عنوان «انجام‌شده» شمرده می‌شدند؛ حالا با کسر کار تأییدنشده، عدد واقعی حدود ۹۵٪ است.
+    وزن‌ها جمعاً ۱۲۲ هستند. ردیف‌های <b>سندباکس سیستم‌عامل</b> و <b>انتشار و امضا</b> قبلاً اصلاً وزن نداشتند و
+    به‌عنوان «انجام‌شده» شمرده می‌شدند؛ با کسر کار تأییدنشده عدد واقعی ۹۷٪ است. بازمانده: سندباکس مک/ویندوز که به میزبان خودشان نیاز دارد و registry شبکه‌ای APM.
     این تخمین داخلی است — تنها معیار قابل اتکا، اجرای تست و <span class="kbd">sandbox-selftest.sh</span> است.
   </p>
 
@@ -310,9 +310,9 @@
       <div class="bar"><i style="width:95%; background:linear-gradient(90deg,#58e0c8,#3fb9d8)"></i></div>
     </div>
     <div class="score">
-      <div class="big" style="color:#ffb454">۷۰٪</div>
+      <div class="big" style="color:#ffb454">۸۵٪</div>
       <div class="lbl">به عنوان محصول production</div>
-      <div class="bar"><i style="width:70%; background:linear-gradient(90deg,#ffb454,#ff8f6b)"></i></div>
+      <div class="bar"><i style="width:85%; background:linear-gradient(90deg,#ffb454,#ff8f6b)"></i></div>
     </div>
   </div>
   <p class="hint" style="margin-top:14px">
@@ -330,7 +330,7 @@
 
   <div class="two">
     <div class="panel list">
-      <h3>✅ انجام‌شده در جلسهٔ ۴ و این جلسه <span class="tag">۲۷۴ تست محلی</span></h3>
+      <h3>✅ انجام‌شده در جلسهٔ ۴ و این جلسه <span class="tag">۳۷۳ تست محلی + CI سه‌سکویی</span></h3>
       <ul>
         <li><s>گیت نوع در <span class="kbd">aec run</span></s> ✅ <span class="tag">۱۸.۵</span></li>
         <li><s><span class="kbd">var</span> تغییرپذیر در برابر <span class="kbd">let</span></s> ✅ <span class="tag">۱۸.۷.۱</span></li>
@@ -339,8 +339,8 @@
         <li><s>Lambda + کلیدواژهٔ <span class="kbd">function</span></s> ✅ <span class="tag">۱۸.۷.۴</span></li>
         <li><s>Quick Wins (لیست builtin چکر + <span class="kbd">padding</span>)</s> ✅ <span class="tag">۱۸.۱۳</span></li>
         <li><s>رفع ۳ باگ پنهان</s> ✅ <span class="tag">none / <span class="kbd">?</span> در نوع / هشدار کاذب</span></li>
-         <li>تأیید build/test/package/smoke روی Linux، macOS و Windows <span class="tag">run 36090223034 موفق</span> ✅</li>
-         <li>nominal <span class="kbd">struct</span>/<span class="kbd">enum</span>، constructor، equality و pattern matching <span class="tag">۳۱۸ تست</span> ✅</li>
+         <li>تأیید build/test/clippy/package/smoke روی Linux، macOS و Windows <span class="tag">run v0.1.0 موفق</span> ✅</li>
+         <li>nominal <span class="kbd">struct</span>/<span class="kbd">enum</span>، constructor، equality و pattern matching <span class="tag">۳۷۳ تست</span> ✅</li>
       </ul>
     </div>
 
@@ -369,7 +369,8 @@
     <div class="panel list">
       <h3>🟢 تکمیل و توزیع</h3>
       <ul>
-        <li>CI سه‌سکویی با build، package و smoke test موفق شد؛ انتشار artifact release و امضای خروجی باقی است <span class="tag">۱۸.۹</span></li>
+        <li>CI سه‌سکویی با build، test، clippy، package، smoke و sandbox تا tag <span class="kbd">v0.1.0</span> سبز شد <span class="tag">۱۸.۹ ✓</span></li>
+        <li>release <span class="kbd">v0.1.0</span> منتشر شد: <span class="kbd">aec-linux/macos/windows</span>، <span class="kbd">SHA256SUMS</span>، امضای GPG و <span class="kbd">install-release.sh</span> <span class="tag">۱۸.۹ ✓</span></li>
         <li>راهنمای زبان، builtin، theme، component و APM به‌روز شد <span class="tag">۱۸.۱۰</span></li>
         <li>مثال چت آفلاین، ماژول alias و LLM mock اضافه شد؛ چت متصل به کلید واقعی ندارد <span class="tag">۱۸.۱۰</span></li>
         <li>APM محلی: binary <span class="kbd">apm</span>، manifest + lockfile + <span class="kbd">init</span>/<span class="kbd">add</span>/<span class="kbd">remove</span>/<span class="kbd">install</span>/<span class="kbd">list</span>/<span class="kbd">tree</span> <span class="tag">۱۸.۱۱</span></li>
@@ -379,7 +380,7 @@
     </div>
 
     <div class="panel list">
-      <h3>📦 تغییرات تازه <span class="tag">۲۰۲۶-۱۰-۰۱</span></h3>
+      <h3>📦 تغییرات تازه <span class="tag">۲۰۲۶-۱۰-۰۲</span></h3>
       <ul>
         <li>بارگذار چندفایلی، <span class="kbd">pub</span>/alias، duplicate detection و گزارش منبع خطا در <span class="kbd">check</span>، <span class="kbd">ast</span> و <span class="kbd">run</span></li>
         <li>واکنش‌پذیری UI، scope component/loop، event arguments، type/UI diagnostics و parse_color امن</li>
@@ -389,7 +390,13 @@
         <li><b>جایگزینی:</b> اسکریپت Windows که با <span class="kbd">Start-Job</span> هیچ ایزولیشنی نمی‌کرد، با Windows Sandbox واقعی (<span class="kbd">.wsb</span>) عوض شد</li>
         <li><b>ابزار جدید:</b> <span class="kbd">sandbox-selftest.sh</span> که per-platform <span class="kbd">verified</span>/<span class="kbd">untested</span> گزارش می‌دهد، و <span class="kbd">install-release.sh</span> برای نصب از release</li>
         <li><b>README کامل</b> با جدول CLI، معماری کریت‌ها، و مرزهای باز به‌جای ادعای ۱۰۰٪</li>
-        <li><b>۳۷۳ تست سبز</b> و <b>CI سه‌سکویی موفق</b>؛ QA بصری native هنوز انجام نشده</li>
+        <li><b>رفع شکست واقعی CI در مک:</b> temp مک زیر <span class="kbd">/var</span> است که symlink به <span class="kbd">/private/var</span> است؛ چک symlink از ریشهٔ فایل‌سیستم آن را رد می‌کرد</li>
+        <li><b>رفع شکست واقعی CI در ویندوز:</b> پارامتر <span class="kbd">private</span> در <span class="kbd">write_new_file</span> فقط زیر <span class="kbd">#[cfg(unix)]</span> استفاده می‌شد و <span class="kbd">clippy -D warnings</span> آن را خطا می‌گرفت</li>
+        <li><b>رفع باگ محیطی CI:</b> مرحلهٔ sandbox لینوکس مسیر <span class="kbd">/workspace</span> را می‌داد که روی میزبان رانر وجود ندارد؛ و محدودیت user-namespace اوبونتو ۲۴.۰۴ با sysctl برداشته شد</li>
+        <li><b>ابزار جدید:</b> <span class="kbd">ci-diagnose.sh</span> و <span class="kbd">ci-clippy.sh</span> که خطاها را به annotation قابل‌خواندن تبدیل می‌کنند؛ clippy حالا در هر سه پلتفرم اجرا می‌شود</li>
+        <li><b>release واقعی + رجیستری واقعی:</b> <span class="kbd">v0.1.0</span> منتشر شد و یک پکیج امضاشدهٔ APM (<span class="kbd">hello-agent@0.1.0</span>) با <span class="kbd">apm publish</span> منتشر و <span class="kbd">verify</span> شد</li>
+        <li><b>سایت مستندات آنلاین شد:</b> <span class="kbd">aec-lang.github.io/aec</span> (Pages فعال و deploy موفق)</li>
+        <li><b>۳۷۳ تست سبز</b> و <b>CI سه‌سکویی موفق (شامل clippy)</b>؛ QA بصری native روی مک/ویندوز هنوز انجام نشده</li>
       </ul>
     </div>
   </div>
@@ -398,11 +405,12 @@
     <div class="ic">🔍</div>
     <div>
       <b>آنچه در این نسخه واقعاً اجرا و تأیید شد:</b> سندباکس لینوکس زیر bwrap (خواندن بیرون از
-      workspace و نوشتن داخل آن هر دو شکست خوردند)، امضای GPG با کلید موقت و
-      <span class="kbd">gpg --verify</span> موفق، اسکریپت نصب release با تأیید
+      workspace و نوشتن داخل آن هر دو شکست خوردند)، امضای GPG با کلید انتشار واقعی و
+      <span class="kbd">gpg --verify</span> موفق، نصب از release عمومی با تأیید
       <span class="kbd">SHA256SUMS</span>، ۳۷۳ تست سبز، و ۹ مثال که همگی type-check می‌شوند.
-      CI روی Linux، macOS و Windows با run <span class="kbd">36091198326</span> موفق بوده است.
-      <b>تأییدنشده:</b> سندباکس مک/ویندوز، QA بصری native، و release منتشرشده.
+      CI روی Linux، macOS و Windows (شامل clippy) روی tag <span class="kbd">v0.1.0</span> موفق شد، و
+      release <span class="kbd">v0.1.0</span> با سه آرشیو و امضا منتشر شده است.
+      <b>تأییدنشده:</b> سندباکس مک/ویندوز و QA بصری native — هر دو به میزبان آن سیستم‌عامل‌ها نیاز دارند.
     </div>
   </div>
 
@@ -448,8 +456,8 @@
       <div class="st-desc">scope component/loop، event arguments، rebuild واکنشی و ۹ تست visual_qa پاس شدند.</div>
     </div>
     <div class="step">
-      <div class="st-top"><span class="st-name"><span class="badge mid">◐ بخشی</span> ۹ — Cross-platform Build</span></div>
-      <div class="st-desc">build/test/package روی هر سه سیستم‌عامل موفق (run <span class="kbd">36091198326</span>). انتشار artifact و امضا هنوز باقی است.</div>
+      <div class="st-top"><span class="st-name"><span class="badge ok">✓ انجام شد</span> ۹ — Cross-platform Build</span></div>
+      <div class="st-desc">build/test/clippy/package روی هر سه سیستم‌عامل با ران tag <span class="kbd">v0.1.0</span> موفق شد؛ artifact سه‌سکویی ساخته و منتشر شد.</div>
     </div>
     <div class="step done">
       <div class="st-top"><span class="st-name"><span class="badge ok">✓ انجام شد</span> ۱۰ — Docs + Examples</span></div>
@@ -461,15 +469,15 @@
     </div>
     <div class="step">
       <div class="st-top"><span class="st-name"><span class="badge mid">◐ بخشی</span> ۱۲ — OS Sandbox سه‌سکویی</span></div>
-      <div class="st-desc">لینوکس با bwrap <b>تأییدشده</b> (خواندن بیرون و نوشتن داخل workspace هر دو fail-closed). اسکریپت مک و ویندوز نوشته شده ولی روی میزبان خودشان اجرا نشده.</div>
+      <div class="st-desc">لینوکس با bwrap <b>تأییدشده</b> (<span class="kbd">sandbox-selftest.sh</span> عدد <span class="kbd">verified</span> می‌دهد؛ خواندن بیرون و نوشتن داخل workspace هر دو fail-closed). مک و ویندوز <span class="kbd">untested</span> هستند چون به میزبان خودشان نیاز دارند.</div>
     </div>
     <div class="step">
-      <div class="st-top"><span class="st-name"><span class="badge mid">◐ بخشی</span> ۱۳ — انتشار و امضا</span></div>
-      <div class="st-desc">اسکریپت امضا با کلید موقت تست شد و <span class="kbd">install-release.sh</span> آماده است. <b>کار باقی‌مانده:</b> commit، push و tag کردن <span class="kbd">v0.1.0</span> تا release واقعی ساخته شود.</div>
+      <div class="st-top"><span class="st-name"><span class="badge ok">✓ انجام شد</span> ۱۳ — انتشار و امضا</span></div>
+      <div class="st-desc">release <span class="kbd">v0.1.0</span> منتشر شد: <span class="kbd">aec-linux/macos/windows</span> + <span class="kbd">SHA256SUMS</span> + امضای GPG (<span class="kbd">gpg --verify</span>: Good signature). <span class="kbd">install-release.sh</span> از همین آرشیوها نصب و اجرا شد.</div>
     </div>
     <div class="step">
       <div class="st-top"><span class="st-name"><span class="badge mid">◐ باز</span> ۱۴ — QA بصری native</span></div>
-      <div class="st-desc">تست‌های headless سبزند، ولی بازبینی چشمی پنجرهٔ واقعی با ورودی، دکمه، state، RTL و theme روی هر سه سیستم‌عامل انجام نشده.</div>
+      <div class="st-desc">تست‌های headless روی هر سه سیستم‌عامل سبزند (پیکسل، کلیک، تایپ، RTL، تم)، ولی بازبینی چشمی پنجرهٔ واقعی روی مک و ویندوز انجام نشده — این آیتم به میزبان آن سیستم‌عامل‌ها نیاز دارد.</div>
     </div>
   </div>
 
@@ -477,9 +485,10 @@
     <div class="ic">🧭</div>
     <div>
       <b>جمع‌بندی یک‌خطی:</b> AEC یک زبان کاربردی با هستهٔ runtime، type checker، UI واکنشی،
-      حافظه، مجوز داخلی، مدل‌های LLM، ماژول‌های عمومی و APM محلی است — ۳۷۳ تست سبز و CI سه‌سکویی موفق.
-      آنچه واقعاً باز است: <b>registry شبکه‌ای</b>، <b>سندباکس تأییدنشدهٔ مک/ویندوز</b>،
-      <b>release منتشرنشده</b> و <b>بازبینی چشمی native</b>. عدد ۱۰۰٪ برای «محصول production» ادعای غیرقابل دفاع بود.
+      حافظه، مجوز داخلی، مدل‌های LLM، ماژول‌های عمومی و APM امضاشده است — ۳۷۳ تست سبز،
+      CI سه‌سکویی موفق (شامل clippy) و release منتشرشدهٔ <span class="kbd">v0.1.0</span> با امضای GPG.
+      آنچه واقعاً باز است: <b>registry شبکه‌ای APM</b>، <b>سندباکس تأییدنشدهٔ مک/ویندوز</b>
+      و <b>بازبینی چشمی پنجرهٔ native روی مک/ویندوز</b>.
     </div>
   </div>
 
@@ -497,7 +506,7 @@
   </div>
 
   <footer>
-    AEC — گزارش وضعیت زبان · ۲۰۲۶-۱۰-۰۱ · ۳۷۳ تست سبز · CI سه‌سکویی موفق · ≈۹۵٪ دامنهٔ زبان
+    AEC — گزارش وضعیت زبان · ۲۰۲۶-۱۰-۰۲ · ۳۷۳ تست سبز · CI سه‌سکویی موفق (شامل clippy) · release v0.1.0 منتشرشده · ≈۹۷٪ دامنهٔ زبان
   </footer>
 </div>
 </body>
