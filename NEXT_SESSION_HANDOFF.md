@@ -1,6 +1,6 @@
 # AEC — هندآف فنی و محصولی
 
-**آخرین تطبیق با مخزن: ۲۵ سپتامبر ۲۰۲۶ · ریشه: `/home/mamadi/aec`**
+**آخرین تطبیق با مخزن: ۲ اکتبر ۲۰۲۶ · ریشه: `/home/mamadi/aec`**
 
 > این سند مرجع وضعیت فعلی است، نه وعدهٔ تکمیل پروژه. هدف آن انتقال دقیق معماری، رفتار موجود، شواهد، محدودیت‌ها و تصمیم‌های باز به جلسهٔ بعد است. `docs/roadmap.html` نقشهٔ تصویری و برآورد پیشرفت است؛ عددهای آن جایگزین آزمون واقعی نمی‌شوند. هر ادعای «تکمیل» را با کد و تست همان بخش دوباره بسنج.
 
@@ -10,9 +10,19 @@
 
 بنا به گفتهٔ سازنده، محمدمهدی علوی، هنگام ساخت این پروژه **۱۳ ساله** بوده و تقریباً در **سه روز** آن را تا مرحلهٔ مطرح‌شده رسانده است. این سن و بازهٔ زمانی ادعای شخصی او هستند، نه نتیجهٔ مستقلاً راستی‌آزمایی‌شدهٔ git history. در معرفی بیرونی به همین دقت بیان شوند.
 
-**وضعیت آخرین اجرای گزارش‌شده:** `cargo test --workspace --locked --no-fail-fast -q` با **۳۱۸ تست قبول، صفر شکست، یک تست ignored**؛ `cargo check --workspace --locked`، `cargo clippy --workspace --all-targets --locked -- -D warnings`، تست‌های CLI/APM، `cargo package --workspace --allow-dirty --no-verify --locked` و `git diff --check` پاک. `cargo fmt --all -- --check` به‌دلیل اختلاف‌های گستردهٔ قالب‌بندی موجود در مخزن شکست می‌خورد؛ برای پرهیز از patch نامرتبط bulk-format انجام نشد. این نتایج لینوکس محلی‌اند؛ علاوه بر آن‌ها، GitHub Actions run `36090223034` روی Linux، macOS و Windows با build/test/package/smoke موفق بود. commitهای اصلی `8d169f8` و `47ce76f` روی `main` و `origin/main` قرار دارند.
+**وضعیت آخرین اجرا (به‌روزرسانی ۲۰۲۶-۱۰-۰۲):** `cargo test --workspace --locked --no-fail-fast` با **۳۷۳ تست قبول و صفر شکست**؛ `cargo check --workspace --locked`، `cargo clippy --workspace --all-targets --locked -- -D warnings` و `cargo package --workspace --no-verify --locked` پاک. CI روی **هر سه سیستم‌عامل** (Linux/macOS/Windows) شامل `cargo check`، `test`، `clippy -D warnings`، build، package و smoke **سبز** است (ورک‌فلو `ci.yml`). `cargo fmt --all -- --check` هنوز به‌دلیل اختلاف‌های قالب‌بندی موجود در مخزن شکست می‌خورد؛ bulk-format انجام نشد.
 
-امتیاز `docs/roadmap.html` اکنون **حدود ۹۸٪ تخمینی و داخلی** است و باید با شواهد همین مخزن بازخوانی شود؛ عدد ۱۰۰٪ فقط برای دامنهٔ تعریف‌شده و پس از آزمون محیط مقصد قابل دفاع است. namespace چندلایه، type alias، nominal struct/enum، package workspace، registry محلی، Ed25519 integrity/signing، Linux bwrap smoke، release build، startup زیر Xvfb و CI سه‌سکویی تأیید شده‌اند؛ اما QA بصری native، runtime registry resolution/key rotation و sandbox بومی macOS/Windows هنوز اثبات نشده‌اند. این اعداد را بدون توضیح دامنه و ضعف‌های باز، به عنوان معیار مستقل بیرونی معرفی نکن.
+**انتشار:** release عمومی <https://github.com/aec-lang/aec/releases/tag/v0.1.0> منتشر شده است — `aec-linux/macos/windows`، `SHA256SUMS` و `.asc` برای هر سه. `gpg --verify` با کلید انتشار واقعی «Good signature» می‌دهد، `sha256sum --check` پاس می‌شود، و `scripts/install-release.sh` از همین آرشیوها نصب و باینری نصب‌شده اجرا شد. سایت مستندات آنلاین: <https://aec-lang.github.io/aec/>.
+
+**سه شکست واقعی CI که در این جلسه رفع شد** (هر سه فقط با اجرای واقعی روی رانر ظاهر شدند، نه با خواندن کد):
+1. `ci.yml` مرحلهٔ sandbox را با مسیر `/workspace/target/release/aec` صدا می‌زد که فقط *داخل* mount مربوط به bubblewrap وجود دارد، نه روی میزبان؛ اسکریپت `sandbox-linux.sh` قراردادش مسیر میزبان است و خودش بازنویسی می‌کند. همچنین `ubuntu-latest` روی ۲۴.۰۴ محدودیت user-namespace دارد که bwrap لازم دارد و با `sysctl` برداشته شد.
+2. `crates/aec-ui/src/tui_driver.rs` از `libc::termios` استفاده می‌کرد بدون گارد پلتفرم؛ `libc` روی ویندوز `termios` ندارد و `cargo check` ویندوز می‌شکست. حالا `RawMode` زیر `#[cfg(unix)]` است با جانشین no-op.
+3. `crates/aec-cli/src/package.rs` هر مسیری را از ریشهٔ فایل‌سیستم می‌پیمود و هر symlink را رد می‌کرد؛ temp مک زیر `/var` است که symlink به `/private/var` است و temp ویندوز junction دارد، پس همهٔ fixtureها رد می‌شدند. حالا کامپوننت‌های هم‌تراز/بالاتر از temp و cwd قابل‌اعتمادند، ولی symlink *زیر* یک پیشوند سیستمی همچنان رد می‌شود (تست رد symlink در payload دست‌نخورده پاس می‌شود).
+   همچنین پارامتر `private` در `write_new_file` فقط زیر `#[cfg(unix)]` استفاده می‌شد و `clippy -D warnings` ویندوز آن را «unused variable» می‌گرفت.
+
+**دو شکاف ابزاری که بسته شد:** clippy حالا در `ci.yml` روی هر سه پلتفرم اجرا می‌شود (قبلاً فقط در `release.yml` بود، پس خرابی ویندوز تا لحظهٔ tag مخفی ماند)، و `scripts/ci-diagnose.sh` + `scripts/ci-clippy.sh` خطاها را به annotation قابل‌خواندن تبدیل می‌کنند چون سرور لاگ GitHub از این شبکه در دسترس نیست (`--log` تایم‌اوت می‌دهد؛ `check-runs/<job>/annotations` کار می‌کند).
+
+امتیاز `docs/roadmap.html` اکنون **۹۷٪ وزنی (۱۱۸.۳۵ از ۱۲۲)** است؛ حساب هر ردیف با `weight × percent` بازبینی و تأیید شد. پیاده‌سازی زبان، runtime، UI واکنشی، type checker، حافظه، مجوز داخلی، APM امضاشده، sandbox لینوکس (verified)، CI سه‌سکویی و release/امضا همه تأییدشده‌اند. **آنچه واقعاً باز است و باید باز بماند:** (الف) سندباکس بومی مک/ویندوز و QA بصری پنجرهٔ native روی آن دو — این دو به میزبان همان سیستم‌عامل‌ها نیاز دارند و `sandbox-selftest.sh` صادقانه `untested` می‌دهد؛ (ب) registry شبکه‌ای APM (کلاینت HTTP، چرخش کلید، اتصال به import رانتایم)؛ (ج) فراتر از دامنه: generic inference، runtime ناهمگام، A2A و IDE. بدون میزبان مک/ویندوز، عدد ۱۰۰٪ برای «محصول production» قابل دفاع نیست.
 
 ## ۲. دستور شروع جلسهٔ بعد
 
