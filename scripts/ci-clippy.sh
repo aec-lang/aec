@@ -8,6 +8,9 @@ set -uo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 
+# Force plain output so diagnostics parse regardless of the runner's TTY.
+export CARGO_TERM_COLOR=never
+
 log=$(mktemp)
 cargo clippy --workspace --all-targets --locked -- -D warnings >"$log" 2>&1
 status=$?

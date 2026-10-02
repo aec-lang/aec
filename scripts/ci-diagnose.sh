@@ -14,6 +14,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 
 export RUST_BACKTRACE=1
+export CARGO_TERM_COLOR=never
 
 if [[ $# -ge 1 && -f "$1" ]]; then
     log=$1

@@ -1467,8 +1467,12 @@ fn normalized_output_path(path: &Path, label: &str) -> Result<PathBuf> {
 fn write_new_file(path: &Path, contents: &[u8], private: bool) -> Result<()> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
+    // POSIX permission bits do not exist on Windows, so the flag is unused
+    // there; naming it keeps the single signature both callers rely on.
     #[cfg(unix)]
     options.mode(if private { 0o600 } else { 0o644 });
+    #[cfg(not(unix))]
+    let _ = private;
     let mut file = options
         .open(path)
         .with_context(|| format!("cannot create {}", path.display()))?;
