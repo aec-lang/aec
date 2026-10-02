@@ -931,9 +931,20 @@ fn ensure_no_symlink_components(path: &Path) -> Result<()> {
             .with_context(|| "cannot resolve current directory")?
             .join(path)
     };
+    let trusted = trusted_system_prefixes();
     let mut current = PathBuf::new();
     for component in absolute.components() {
         current.push(component.as_os_str());
+        // System plumbing is not attacker-controlled and is symlinked on
+        // purpose: `/var` is a link to `/private/var` on macOS and the
+        // platform temp directory lives below it, and Windows temp roots
+        // contain junctions. Rejecting those would make every package under
+        // the platform temp directory unusable. Only components *below* a
+        // system prefix are security-relevant, because that is where a link
+        // could redirect a read or a write into someone else's tree.
+        if trusted.iter().any(|prefix| prefix.starts_with(&current)) {
+            continue;
+        }
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 bail!("path must not contain a symbolic link: {}", current.display())
@@ -947,6 +958,23 @@ fn ensure_no_symlink_components(path: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Path prefixes whose own components are allowed to be symlinks.
+///
+/// Both the lexical and the canonical spelling of the platform temp directory
+/// and the working directory are included, so a link such as macOS' `/var`
+/// is recognized even though canonicalizing it turns the path into
+/// `/private/var/...`.
+fn trusted_system_prefixes() -> Vec<PathBuf> {
+    let mut prefixes = Vec::new();
+    for candidate in [std::env::temp_dir(), std::env::current_dir().unwrap_or_default()] {
+        prefixes.push(candidate.clone());
+        if let Ok(canonical) = fs::canonicalize(&candidate) {
+            prefixes.push(canonical);
+        }
+    }
+    prefixes
 }
 
 fn normalize_lock_path(path: &Path) -> String {

@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Runs the workspace test suite and turns every failure into a GitHub
-# annotation, so the exact test name and panic message are readable from the
-# run page instead of being buried in a log download.
+# Turns failing tests into GitHub annotations, including the full panic text.
 #
-# Usage: scripts/ci-diagnose.sh
+# The job log is not always reachable (the log server can be blocked), but
+# check-run annotations are. GitHub reads one line per `::error::` command, so
+# the panic message is newline-escaped with `%0A`, which GitHub decodes back
+# into a readable multi-line annotation.
+#
+# Usage: scripts/ci-diagnose.sh [path-to-captured-test-output]
+# Without a path the suite is run again with --no-fail-fast.
 set -uo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -11,31 +15,37 @@ cd "$ROOT"
 
 export RUST_BACKTRACE=1
 
-log=$(mktemp)
-cargo test --workspace --locked --no-fail-fast >"$log" 2>&1
-status=$?
-
-echo "cargo test exit status: $status"
-echo "--- failing tests ---"
-
-awk '
-  /^---- .* stdout ----$/ {
-    name = $2
-    getline; getline
-    msg = $0
-    getline more
-    if (more ~ /^[[:space:]]/) msg = msg " " more
-    printf "%s\t%s\n", name, msg
-  }
-' "$log" | while IFS=$'\t' read -r name message; do
-  printf '::error title=failing test::%s — %s\n' "$name" "$message"
-done
+if [[ $# -ge 1 && -f "$1" ]]; then
+    log=$1
+else
+    log=$(mktemp)
+    cargo test --workspace --locked --no-fail-fast >"$log" 2>&1 || true
+fi
 
 echo "--- result lines ---"
-grep -E "^test result:" "$log" | sort | uniq -c
+grep -E "^test result:" "$log" | sort | uniq -c || true
 
-echo "--- first panic block ---"
-grep -n "panicked at" -A 6 "$log" | head -40
-
-rm -f "$log"
-exit "$status"
+# Each failure block is:
+#   ---- <test name> stdout ----
+#   <thread ... panicked at ...>
+#   <message lines>
+#   ---- <test name> stdout ----
+#   (or end of file)
+awk '
+  /^---- .* stdout ----$/ {
+    if (name != "") { emit() }
+    name = $2
+    msg = ""
+    next
+  }
+  name != "" { msg = msg (msg == "" ? "" : "\\n") $0 }
+  END { if (name != "") emit() }
+  function emit() {
+    gsub(/\r/, "", msg)
+    gsub(/%/, "%25", msg)
+    gsub(/\n/, "%0A", msg)
+    printf "::error title=failing test: %s::%s\n", name, msg
+    name = ""
+    msg = ""
+  }
+' "$log"
