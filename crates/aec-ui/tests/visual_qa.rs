@@ -285,3 +285,16 @@ fn snapshots_are_written_as_decodable_png_files() {
     );
     let _ = std::fs::remove_file(&path);
 }
+
+// ---------------------------------------------------------------------------
+// Platform-tolerance notes for maintainers
+// ---------------------------------------------------------------------------
+//
+// The assertions above are calibrated on the Linux CI runner. Font rasterizers
+// differ per platform (FreeType vs CoreText vs DirectWrite), so anti-aliasing
+// coverage — and therefore exact pixel counts and contrast ratios — can shift
+// slightly between hosts. The thresholds deliberately leave headroom (they
+// assert *readable text*, not identical pixels); if a threshold ever trips on
+// exactly one platform, compare the printed ascii_preview first and treat a
+// systematic drop across all text tests as a font-loading regression, not a
+// test bug.
