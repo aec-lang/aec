@@ -13,11 +13,21 @@ use crate::tui::{self, Key};
 use crate::AecApp;
 
 /// Puts the terminal in raw mode and returns a guard that restores it.
+///
+/// `termios` only exists on POSIX systems; on Windows the terminal driver is
+/// used without raw mode, so the type is a no-op there instead of a build
+/// failure (`libc` on Windows has no `termios`).
+#[cfg(unix)]
 pub struct RawMode {
     #[allow(dead_code)]
     original: libc::termios,
 }
 
+/// Non-POSIX stand-in so `RawMode::enable()` keeps compiling everywhere.
+#[cfg(not(unix))]
+pub struct RawMode;
+
+#[cfg(unix)]
 impl RawMode {
     /// Enters raw mode on stdout, restoring the previous settings on drop.
     pub fn enable() -> Result<Self, String> {
@@ -49,6 +59,7 @@ impl RawMode {
     }
 }
 
+#[cfg(unix)]
 impl Drop for RawMode {
     fn drop(&mut self) {
         // SAFETY: `self.original` was read from the same file descriptor and is
@@ -56,6 +67,14 @@ impl Drop for RawMode {
         unsafe {
             libc::tcsetattr(libc::STDOUT_FILENO, libc::TCSANOW, &self.original);
         }
+    }
+}
+
+#[cfg(not(unix))]
+impl RawMode {
+    /// Raw mode is a POSIX concept; Windows keeps its console untouched.
+    pub fn enable() -> Result<Self, String> {
+        Ok(Self)
     }
 }
 
